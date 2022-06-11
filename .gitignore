@@ -1,2 +1,15 @@
 __pycache__
-
+.DS_Store
+.idea
+RACE.tar.gz
+bert-large-cased-vocab.txt
+bert-large-uncased-vocab.txt
+glue_data
+download_glue_data.py
+megatron_bert_345m_v0.1_cased.zip
+megatron_bert_345m_v0.1_uncased.zip
+examples/results
+RACE
+examples/checkpoints
+try.py
+try_load.py
