@@ -12,12 +12,12 @@ TRAIN_DATA="../glue_data/MNLI/train.tsv"
 VALID_DATA="../glue_data/MNLI/dev_matched.tsv \
             ../glue_data/MNLI/dev_mismatched.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m
+PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split
 CHECKPOINT_PATH=checkpoints/bert_345m_mnli
 
-python -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 1 \
+python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
+               --tensor-model-parallel-size 2 \
+               --pipeline-model-parallel-size 2 \
                --task MNLI \
                --seed 1234 \
                --train-data $TRAIN_DATA \
@@ -31,7 +31,6 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-attention-heads 16 \
                --micro-batch-size 8 \
                --lr 5.0e-5 \
-               --lr-decay-style linear \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
                --max-position-embeddings 512 \
@@ -41,4 +40,9 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-interval 100 \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
-               --fp16
+               --fp16 \
+               --is-pipeline-compress True \
+               --pipeline-compress-dim 100 \
+               --is-tensor-compress False \
+               --tensor-compress-dim 2
+

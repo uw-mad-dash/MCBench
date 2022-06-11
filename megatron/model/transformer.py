@@ -18,6 +18,7 @@ import math
 from contextlib import nullcontext
 import torch
 import torch.nn.functional as F
+from torch.nn.parameter import Parameter
 
 from megatron import get_timers, get_args, get_global_memory_buffer
 from megatron import mpu
@@ -689,6 +690,366 @@ class ParallelTransformerLayer(MegatronModule):
         return output
 
 
+class ParallelTransformerEncoderLayer(MegatronModule):
+    """A single transformer layer.
+
+    Transformer layer takes input with size [s, b, h] and returns an
+    output of the same size.
+    """
+
+    def __init__(self, init_method, output_layer_init_method,
+                 layer_number, layer_type=LayerType.encoder,
+                 self_attn_mask_type=AttnMaskType.padding,
+                 drop_path_rate=0.):
+        args = get_args()
+
+        super(ParallelTransformerEncoderLayer, self).__init__()
+        self.layer_number = layer_number
+        self.layer_type = layer_type
+
+        self.apply_residual_connection_post_layernorm \
+            = args.apply_residual_connection_post_layernorm
+
+        self.bf16 = args.bf16
+        self.fp32_residual_connection = args.fp32_residual_connection
+
+        # Layernorm on the input data.
+        self.input_layernorm = LayerNorm(
+            args.hidden_size,
+            eps=args.layernorm_epsilon,
+            no_persist_layer_norm=args.no_persist_layer_norm,
+            sequence_parallel=args.sequence_parallel)
+
+        # Self attention.
+        self.self_attention = ParallelAttention(
+            init_method,
+            output_layer_init_method,
+            layer_number,
+            attention_type=AttnType.self_attn,
+            attn_mask_type=self_attn_mask_type)
+        self.hidden_dropout = args.hidden_dropout
+        self.bias_dropout_fusion = args.bias_dropout_fusion
+        self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else None
+        self.is_pipeline_compress = args.is_pipeline_compress
+
+        # Layernorm on the attention output
+        self.post_attention_layernorm = LayerNorm(
+            args.hidden_size,
+            eps=args.layernorm_epsilon,
+            no_persist_layer_norm=args.no_persist_layer_norm,
+            sequence_parallel=args.sequence_parallel)
+
+        if self.layer_type == LayerType.decoder:
+            self.inter_attention = ParallelAttention(
+                init_method,
+                output_layer_init_method,
+                layer_number,
+                attention_type=AttnType.cross_attn)
+            # Layernorm on the attention output.
+            self.post_inter_attention_layernorm = LayerNorm(
+                args.hidden_size,
+                eps=args.layernorm_epsilon,
+                no_persist_layer_norm=args.no_persist_layer_norm,
+                sequence_parallel=args.sequence_parallel)
+
+        # MLP
+        if args.num_experts is not None:
+            self.mlp = SwitchMLP(init_method, output_layer_init_method)
+        else:
+            self.mlp = ParallelMLP(init_method, output_layer_init_method)
+
+        # Set bias+dropout+add fusion grad_enable execution handler.
+        TORCH_MAJOR = int(torch.__version__.split('.')[0])
+        TORCH_MINOR = int(torch.__version__.split('.')[1])
+        use_nvfuser = TORCH_MAJOR > 1 or (TORCH_MAJOR == 1 and TORCH_MINOR >= 10)
+        self.bias_dropout_add_exec_handler = \
+                nullcontext if use_nvfuser else torch.enable_grad
+
+        if self.is_pipeline_compress:
+            # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+            self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                torch.empty(args.pipeline_compress_dim, args.hidden_size,
+                            dtype=args.params_dtype)
+            ))
+
+    def forward(self, hidden_states, attention_mask,
+                encoder_output=None, enc_dec_attn_mask=None,
+                inference_params=None):
+        # hidden_states: [s, b, h]
+
+        # Layer norm at the beginning of the transformer layer.
+        layernorm_output = self.input_layernorm(hidden_states)
+        # Self attention.
+        attention_output, attention_bias = \
+            self.self_attention(
+                layernorm_output,
+                attention_mask,
+                inference_params=inference_params)
+
+        # Residual connection.
+        if self.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = hidden_states
+
+        if self.drop_path is None:
+            # jit scripting for a nn.module (with dropout) is not
+            # trigerring the fusion kernel. For now, we use two
+            # different nn.functional routines to account for varying
+            # dropout semantics during training and inference phases.
+            if self.bias_dropout_fusion:
+                if self.training:
+                    bias_dropout_add_func = bias_dropout_add_fused_train
+                else:
+                    bias_dropout_add_func = bias_dropout_add_fused_inference
+            else:
+                bias_dropout_add_func = get_bias_dropout_add(self.training)
+
+            with self.bias_dropout_add_exec_handler():
+                layernorm_input = bias_dropout_add_func(
+                    attention_output,
+                    attention_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+        else:
+            out = torch.nn.functional.dropout(attention_output + attention_bias,
+                                              p=self.hidden_dropout,
+                                              training=self.training)
+            layernorm_input = residual + self.drop_path(out)
+
+        # Layer norm post the self attention.
+        layernorm_output = self.post_attention_layernorm(layernorm_input)
+
+        if self.layer_type == LayerType.decoder:
+            attention_output, attention_bias = \
+                self.inter_attention(layernorm_output,
+                                     enc_dec_attn_mask,
+                                     encoder_output=encoder_output)
+            # residual connection
+            if self.apply_residual_connection_post_layernorm:
+                residual = layernorm_output
+            else:
+                residual = layernorm_input
+
+            with self.bias_dropout_add_exec_handler():
+                layernorm_input = bias_dropout_add_func(
+                    attention_output,
+                    attention_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+
+            # Layer norm post the decoder attention
+            layernorm_output = self.post_inter_attention_layernorm(layernorm_input)
+
+        # MLP.
+        mlp_output, mlp_bias = self.mlp(layernorm_output)
+
+        # Second residual connection.
+        if self.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = layernorm_input
+
+        if self.drop_path is None:
+            with self.bias_dropout_add_exec_handler():
+                output = bias_dropout_add_func(
+                    mlp_output,
+                    mlp_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+        else:
+            out = torch.nn.functional.dropout(mlp_output + mlp_bias,
+                                              p=self.hidden_dropout,
+                                              training=self.training)
+            output = residual + self.drop_path(out)
+
+        if self.is_pipeline_compress:
+            output = F.linear(output, self.encoder)
+            # output = F.normalize(output)
+
+        return output
+
+
+class ParallelTransformerDecoderLayer(MegatronModule):
+    """A single transformer layer.
+
+    Transformer layer takes input with size [s, b, h] and returns an
+    output of the same size.
+    """
+
+    def __init__(self, init_method, output_layer_init_method,
+                 layer_number, layer_type=LayerType.encoder,
+                 self_attn_mask_type=AttnMaskType.padding,
+                 drop_path_rate=0.):
+        args = get_args()
+
+        super(ParallelTransformerDecoderLayer, self).__init__()
+        self.layer_number = layer_number
+        self.layer_type = layer_type
+
+        self.apply_residual_connection_post_layernorm \
+            = args.apply_residual_connection_post_layernorm
+
+        self.bf16 = args.bf16
+        self.fp32_residual_connection = args.fp32_residual_connection
+
+        # Layernorm on the input data.
+        self.input_layernorm = LayerNorm(
+            args.hidden_size,
+            eps=args.layernorm_epsilon,
+            no_persist_layer_norm=args.no_persist_layer_norm,
+            sequence_parallel=args.sequence_parallel)
+
+        # Self attention.
+        self.self_attention = ParallelAttention(
+            init_method,
+            output_layer_init_method,
+            layer_number,
+            attention_type=AttnType.self_attn,
+            attn_mask_type=self_attn_mask_type)
+        self.hidden_dropout = args.hidden_dropout
+        self.bias_dropout_fusion = args.bias_dropout_fusion
+        self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else None
+        self.is_pipeline_compress = args.is_pipeline_compress
+
+        # Layernorm on the attention output
+        self.post_attention_layernorm = LayerNorm(
+            args.hidden_size,
+            eps=args.layernorm_epsilon,
+            no_persist_layer_norm=args.no_persist_layer_norm,
+            sequence_parallel=args.sequence_parallel)
+
+        if self.layer_type == LayerType.decoder:
+            self.inter_attention = ParallelAttention(
+                init_method,
+                output_layer_init_method,
+                layer_number,
+                attention_type=AttnType.cross_attn)
+            # Layernorm on the attention output.
+            self.post_inter_attention_layernorm = LayerNorm(
+                args.hidden_size,
+                eps=args.layernorm_epsilon,
+                no_persist_layer_norm=args.no_persist_layer_norm,
+                sequence_parallel=args.sequence_parallel)
+
+        # MLP
+        if args.num_experts is not None:
+            self.mlp = SwitchMLP(init_method, output_layer_init_method)
+        else:
+            self.mlp = ParallelMLP(init_method, output_layer_init_method)
+
+        # Set bias+dropout+add fusion grad_enable execution handler.
+        TORCH_MAJOR = int(torch.__version__.split('.')[0])
+        TORCH_MINOR = int(torch.__version__.split('.')[1])
+        use_nvfuser = TORCH_MAJOR > 1 or (TORCH_MAJOR == 1 and TORCH_MINOR >= 10)
+        self.bias_dropout_add_exec_handler = \
+                nullcontext if use_nvfuser else torch.enable_grad
+
+        if self.is_pipeline_compress:
+            # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+            self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                torch.empty(args.hidden_size, args.pipeline_compress_dim,
+                            dtype=args.params_dtype))
+            )
+
+    def forward(self, hidden_states, attention_mask,
+                encoder_output=None, enc_dec_attn_mask=None,
+                inference_params=None):
+        # hidden_states: [s, b, h]
+
+        if self.is_pipeline_compress:
+            hidden_states = F.linear(hidden_states, self.decoder)
+            # hidden_states = F.normalize(hidden_states)
+
+        # Layer norm at the beginning of the transformer layer.
+        layernorm_output = self.input_layernorm(hidden_states)
+        # Self attention.
+        attention_output, attention_bias = \
+            self.self_attention(
+                layernorm_output,
+                attention_mask,
+                inference_params=inference_params)
+
+        # Residual connection.
+        if self.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = hidden_states
+
+        if self.drop_path is None:
+            # jit scripting for a nn.module (with dropout) is not
+            # trigerring the fusion kernel. For now, we use two
+            # different nn.functional routines to account for varying
+            # dropout semantics during training and inference phases.
+            if self.bias_dropout_fusion:
+                if self.training:
+                    bias_dropout_add_func = bias_dropout_add_fused_train
+                else:
+                    bias_dropout_add_func = bias_dropout_add_fused_inference
+            else:
+                bias_dropout_add_func = get_bias_dropout_add(self.training)
+
+            with self.bias_dropout_add_exec_handler():
+                layernorm_input = bias_dropout_add_func(
+                    attention_output,
+                    attention_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+        else:
+            out = torch.nn.functional.dropout(attention_output + attention_bias,
+                                              p=self.hidden_dropout,
+                                              training=self.training)
+            layernorm_input = residual + self.drop_path(out)
+
+        # Layer norm post the self attention.
+        layernorm_output = self.post_attention_layernorm(layernorm_input)
+
+        if self.layer_type == LayerType.decoder:
+            attention_output, attention_bias = \
+                self.inter_attention(layernorm_output,
+                                     enc_dec_attn_mask,
+                                     encoder_output=encoder_output)
+            # residual connection
+            if self.apply_residual_connection_post_layernorm:
+                residual = layernorm_output
+            else:
+                residual = layernorm_input
+
+            with self.bias_dropout_add_exec_handler():
+                layernorm_input = bias_dropout_add_func(
+                    attention_output,
+                    attention_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+
+            # Layer norm post the decoder attention
+            layernorm_output = self.post_inter_attention_layernorm(layernorm_input)
+
+        # MLP.
+        mlp_output, mlp_bias = self.mlp(layernorm_output)
+
+        # Second residual connection.
+        if self.apply_residual_connection_post_layernorm:
+            residual = layernorm_output
+        else:
+            residual = layernorm_input
+
+        if self.drop_path is None:
+            with self.bias_dropout_add_exec_handler():
+                output = bias_dropout_add_func(
+                    mlp_output,
+                    mlp_bias.expand_as(residual),
+                    residual,
+                    self.hidden_dropout)
+        else:
+            out = torch.nn.functional.dropout(mlp_output + mlp_bias,
+                                              p=self.hidden_dropout,
+                                              training=self.training)
+            output = residual + self.drop_path(out)
+
+        return output
+
+
 class NoopTransformerLayer(MegatronModule):
     """A single 'no-op' transformer layer.
 
@@ -761,6 +1122,24 @@ class ParallelTransformer(MegatronModule):
                 layer_type=layer_type,
                 self_attn_mask_type=self_attn_mask_type,
                 drop_path_rate=self.drop_path_rates[layer_number - 1])
+
+        def build_encoder_layer(layer_number):
+            return ParallelTransformerEncoderLayer(
+                init_method,
+                output_layer_init_method,
+                layer_number,
+                layer_type=layer_type,
+                self_attn_mask_type=self_attn_mask_type,
+                drop_path_rate=self.drop_path_rates[layer_number - 1])
+
+        def build_decoder_layer(layer_number):
+            return ParallelTransformerDecoderLayer(
+                init_method,
+                output_layer_init_method,
+                layer_number,
+                layer_type=layer_type,
+                self_attn_mask_type=self_attn_mask_type,
+                drop_path_rate=self.drop_path_rates[layer_number - 1])
         if args.virtual_pipeline_model_parallel_size is not None:
             assert args.num_layers % args.virtual_pipeline_model_parallel_size == 0, \
                 'num_layers_per_stage must be divisible by ' \
@@ -805,8 +1184,32 @@ class ParallelTransformer(MegatronModule):
             self.num_layers = 1
             self.layers = torch.nn.ModuleList([ NoopTransformerLayer(1) ])
         else:
-            self.layers = torch.nn.ModuleList(
-                [build_layer(i + 1 + offset) for i in range(self.num_layers)])
+            if args.is_pipeline_compress:
+                layers_list = []
+                if mpu.get_pipeline_model_parallel_rank() == 0:
+                    for i in range(self.num_layers):
+                        if i == self.num_layers - 1:
+                            layers_list.append(build_encoder_layer(i + 1 + offset))
+                        else:
+                            layers_list.append(build_layer(i + 1 + offset))
+                elif mpu.get_pipeline_model_parallel_rank() == mpu.get_pipeline_model_parallel_world_size() - 1:
+                    for i in range(self.num_layers):
+                        if i == 0:
+                            layers_list.append(build_decoder_layer(i + 1 + offset))
+                        else:
+                            layers_list.append(build_layer(i + 1 + offset))
+                else:
+                    for i in range(self.num_layers):
+                        if i == 0:
+                            layers_list.append(build_decoder_layer(i + 1 + offset))
+                        elif i == self.num_layers - 1:
+                            layers_list.append(build_encoder_layer(i + 1 + offset))
+                        else:
+                            layers_list.append(build_layer(i + 1 + offset))
+                self.layers = torch.nn.ModuleList(layers_list)
+            else:
+                self.layers = torch.nn.ModuleList(
+                    [build_layer(i + 1 + offset) for i in range(self.num_layers)])
 
         if self.post_process and self.post_layer_norm:
             # Final layer norm before output.

@@ -536,7 +536,10 @@ def get_tensor_shapes(rank, model_type):
             tensor_shapes.append((decoder_seq_length, args.micro_batch_size, args.hidden_size))
             tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     else:
-        tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+        if args.is_pipeline_compress:
+            tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_compress_dim))
+        else:
+            tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     return tensor_shapes
 
 

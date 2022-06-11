@@ -291,7 +291,9 @@ def finetune(train_valid_datasets_provider, model_provider,
         args.load = args.pretrained_checkpoint
         original_rng = args.no_load_rng
         args.no_load_rng = True
-        _ = load_checkpoint(model, None, None)
+        # since we add some compression technique in the neural network
+        # we set the strict to False to deal with missing keys
+        _ = load_checkpoint(model, None, None, strict=False)
         args.load = original_load
         args.no_load_rng = original_rng
         # This is critical when only model is loaded. We should make sure

@@ -42,6 +42,7 @@ def parse_args(extra_args_provider=None, defaults={},
     parser = _add_vision_args(parser)
     parser = _add_logging_args(parser)
     parser = _add_inference_args(parser)
+    parser = _add_compression_args(parser)
 
     # Custom arguments.
     if extra_args_provider is not None:
@@ -337,6 +338,25 @@ def _print_args(args):
 
 def _check_arg_is_not_none(args, arg):
     assert getattr(args, arg) is not None, '{} argument is None'.format(arg)
+
+
+def str2bool(str):
+    return True if str.lower() == 'true' else False
+
+
+def _add_compression_args(parser):
+    group = parser.add_argument_group(title='compression')
+
+    group.add_argument('--is-pipeline-compress', type=str2bool, default=False,
+                       help='whether do pipeline compression.')
+    group.add_argument('--pipeline-compress-dim', type=int, default=2,
+                       help='reduced dimension after pipeline compression.')
+    group.add_argument('--is-tensor-compress', type=str2bool, default=False,
+                       help='whether do tensor compression.')
+    group.add_argument('--tensor-compress-dim', type=int, default=2,
+                       help='reduced dimension after tensor compression.')
+
+    return parser
 
 
 def _add_inference_args(parser):

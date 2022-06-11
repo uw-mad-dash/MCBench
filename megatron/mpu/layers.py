@@ -20,6 +20,8 @@
 
 import math
 
+import sys
+import time
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
@@ -40,6 +42,9 @@ from .utils import divide
 from .utils import split_tensor_along_last_dim
 from .utils import VocabUtility
 from megatron import get_args, get_global_memory_buffer
+
+times = 0
+reduce_time = 0
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {'tensor_model_parallel': False,
                                       'partition_dim': -1,
@@ -467,10 +472,22 @@ class RowParallelLinear(torch.nn.Module):
         # we allocate the transpose.
         # Initialize weight.
         args = get_args()
+        self.is_pipeline_compress = args.is_pipeline_compress
+        self.is_tensor_compress = args.is_tensor_compress
         if args.use_cpu_initialization:
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
                                                 dtype=args.params_dtype))
+            if self.is_tensor_compress:
+                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(args.tensor_compress_dim, self.output_size,
+                                dtype=args.params_dtype))
+                )
+                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(self.output_size, args.tensor_compress_dim,
+                                dtype=args.params_dtype))
+                )
             self.master_weight = _initialize_affine_weight_cpu(
                 self.weight, self.output_size, self.input_size,
                 self.input_size_per_partition, 1, init_method,
@@ -479,6 +496,16 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(
                 self.output_size, self.input_size_per_partition,
                 device=torch.cuda.current_device(), dtype=args.params_dtype))
+            if self.is_tensor_compress:
+                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(args.tensor_compress_dim, self.output_size,
+                                device=torch.cuda.current_device(), dtype=args.params_dtype)
+                ))
+                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(self.output_size, args.tensor_compress_dim,
+                                device=torch.cuda.current_device(), dtype=args.params_dtype)
+                ))
             _initialize_affine_weight_gpu(self.weight, init_method,
                                           partition_dim=1, stride=stride)
         if bias:
@@ -513,10 +540,28 @@ class RowParallelLinear(torch.nn.Module):
             input_parallel, self.weight, None,
             self.gradient_accumulation_fusion, None, None)
         # All-reduce across all the partitions.
+        # output_size = sys.getsizeof(output_parallel.storage())
+        # print("\033[31m size of output_parallel before compression: \033[0m" + str(output_size))
+        if self.is_tensor_compress:
+            output_parallel = F.linear(output_parallel, self.encoder)
+            # output_parallel = F.normalize(output_parallel)
+            # print(output_parallel.size())
+        # output_size = sys.getsizeof(output_parallel.storage())
+        # print("\033[31m size of output_parallel after compression: \033[0m" + str(output_size))
+        global times, reduce_time
+        torch.cuda.synchronize()
+        start = time.time()
         if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+        torch.cuda.synchronize()
+        end = time.time()
+        reduce_time = reduce_time + end - start
+        times = times + 1
+        if self.is_tensor_compress:
+            output_ = F.linear(output_, self.decoder)
+            # output_ = F.normalize(output_)
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
             output_bias = None
