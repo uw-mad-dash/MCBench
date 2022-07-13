@@ -75,7 +75,7 @@ class ParallelMLP(MegatronModule):
     state back into h hidden dimension.
     """
 
-    def __init__(self, init_method, output_layer_init_method):
+    def __init__(self, init_method, output_layer_init_method, layer_number):
         super(ParallelMLP, self).__init__()
         args = get_args()
 
@@ -98,6 +98,7 @@ class ParallelMLP(MegatronModule):
         self.dense_4h_to_h = mpu.RowParallelLinear(
             args.ffn_hidden_size,
             args.hidden_size,
+            layer_number,
             input_is_parallel=True,
             init_method=output_layer_init_method,
             skip_bias_add=True)
@@ -122,13 +123,13 @@ class SwitchMLP(MegatronModule):
     """
     Routes input to one of N MLP "experts"
     """
-    def __init__(self, init_method, output_layer_init_method):
+    def __init__(self, init_method, output_layer_init_method, layer_number):
         super(SwitchMLP, self).__init__()
         args = get_args()
         self.router = torch.nn.Linear(args.hidden_size, args.num_experts)
         self.experts = torch.nn.ModuleList()
         for i in range(args.num_experts):
-            self.experts.append(ParallelMLP(init_method, output_layer_init_method))
+            self.experts.append(ParallelMLP(init_method, output_layer_init_method, layer_number))
 
     def forward(self, hidden_states):
         # hidden_states: [s, b, h]
@@ -360,6 +361,7 @@ class ParallelAttention(MegatronModule):
         self.dense = mpu.RowParallelLinear(
             projection_size,
             args.hidden_size,
+            layer_number,
             input_is_parallel=True,
             init_method=output_layer_init_method,
             skip_bias_add=True)
@@ -585,9 +587,9 @@ class ParallelTransformerLayer(MegatronModule):
 
         # MLP
         if args.num_experts is not None:
-            self.mlp = SwitchMLP(init_method, output_layer_init_method)
+            self.mlp = SwitchMLP(init_method, output_layer_init_method, layer_number)
         else:
-            self.mlp = ParallelMLP(init_method, output_layer_init_method)
+            self.mlp = ParallelMLP(init_method, output_layer_init_method, layer_number)
 
         # Set bias+dropout+add fusion grad_enable execution handler.
         TORCH_MAJOR = int(torch.__version__.split('.')[0])
@@ -754,9 +756,9 @@ class ParallelTransformerEncoderLayer(MegatronModule):
 
         # MLP
         if args.num_experts is not None:
-            self.mlp = SwitchMLP(init_method, output_layer_init_method)
+            self.mlp = SwitchMLP(init_method, output_layer_init_method, layer_number)
         else:
-            self.mlp = ParallelMLP(init_method, output_layer_init_method)
+            self.mlp = ParallelMLP(init_method, output_layer_init_method, layer_number)
 
         # Set bias+dropout+add fusion grad_enable execution handler.
         TORCH_MAJOR = int(torch.__version__.split('.')[0])
@@ -934,9 +936,9 @@ class ParallelTransformerDecoderLayer(MegatronModule):
 
         # MLP
         if args.num_experts is not None:
-            self.mlp = SwitchMLP(init_method, output_layer_init_method)
+            self.mlp = SwitchMLP(init_method, output_layer_init_method, layer_number)
         else:
-            self.mlp = ParallelMLP(init_method, output_layer_init_method)
+            self.mlp = ParallelMLP(init_method, output_layer_init_method, layer_number)
 
         # Set bias+dropout+add fusion grad_enable execution handler.
         TORCH_MAJOR = int(torch.__version__.split('.')[0])

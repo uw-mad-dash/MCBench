@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=ft_qqp_single    # create a short name for your job
-#SBATCH --output=results/1_1_qqp_1024_1024.txt
+#SBATCH --output=results/1_1_qqp_1024_1024_32.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -38,7 +38,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 64 \
-               --micro-batch-size 2 \
+               --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \

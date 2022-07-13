@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=ft_qqp    # create a short name for your job
-#SBATCH --output=results/4_1_qqp_1024_100_1_8.txt
+#SBATCH --job-name=ft_rte    # create a short name for your job
+#SBATCH --output=results/4_1_rte_1024_1024.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -17,22 +17,22 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../glue_data/QQP/train.tsv"
-VALID_DATA="../glue_data/QQP/dev.tsv"
+TRAIN_DATA="../glue_data/RTE/train.tsv"
+VALID_DATA="../glue_data/RTE/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
 PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_16
-CHECKPOINT_PATH=checkpoints/bert_345m_qqp
+CHECKPOINT_PATH=checkpoints/bert_345m_rte
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 2 \
-               --task QQP \
+               --task RTE \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \
                --tokenizer-type BertWordPieceLowerCase \
                --vocab-file $VOCAB_FILE \
-               --epochs 12 \
+               --epochs 3 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
@@ -50,5 +50,5 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --is-pipeline-compress False \
                --pipeline-compress-dim 1024 \
-               --is-tensor-compress True \
-               --tensor-compress-dim 100
+               --is-tensor-compress False \
+               --tensor-compress-dim 1024

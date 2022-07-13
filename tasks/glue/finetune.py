@@ -86,6 +86,69 @@ def main():
             return datapath.split('QQP')[-1].strip(
                 '.tsv').strip('/').replace('_', '-')
 
+    elif args.task == 'CoLA':
+
+        num_classes = 2
+        from tasks.glue.cola import CoLADataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('CoLA')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'SST':
+
+        num_classes = 2
+        from tasks.glue.sst import SSTDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('SST-2')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'MRPC':
+
+        num_classes = 2
+        from tasks.glue.mrpc import MRPCDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('MRPC')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'QNLI':
+
+        num_classes = 2
+        from tasks.glue.qnli import QNLIDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('QNLI')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'RTE':
+
+        num_classes = 2
+        from tasks.glue.rte import RTEDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('RTE')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'WNLI':
+
+        num_classes = 2
+        from tasks.glue.wnli import WNLIDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('WNLI')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
+    elif args.task == 'STS':
+
+        num_classes = 5
+        from tasks.glue.sts import STSDataset as Dataset
+
+        def name_from_datapath(datapath):
+            return datapath.split('STS')[-1].strip(
+                '.tsv').strip('/').replace('_', '-')
+
     else:
         raise NotImplementedError('GLUE task {} is not implemented.'.format(
             args.task))

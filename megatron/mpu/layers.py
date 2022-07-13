@@ -43,9 +43,6 @@ from .utils import split_tensor_along_last_dim
 from .utils import VocabUtility
 from megatron import get_args, get_global_memory_buffer
 
-times = 0
-reduce_time = 0
-
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {'tensor_model_parallel': False,
                                       'partition_dim': -1,
                                       'partition_stride': 1}
@@ -451,7 +448,8 @@ class RowParallelLinear(torch.nn.Module):
                        adding bias but instead return it.
     """
 
-    def __init__(self, input_size, output_size, bias=True,
+    def __init__(self, input_size, output_size, layer_number,
+                 bias=True,
                  input_is_parallel=False,
                  init_method=init.xavier_normal_, stride=1,
                  keep_master_weight_for_test=False,
@@ -461,6 +459,7 @@ class RowParallelLinear(torch.nn.Module):
         # Keep input parameters
         self.input_size = input_size
         self.output_size = output_size
+        self.layer_number = layer_number
         self.input_is_parallel = input_is_parallel
         # Divide the weight matrix along the last dimension.
         world_size = get_tensor_model_parallel_world_size()
@@ -526,8 +525,6 @@ class RowParallelLinear(torch.nn.Module):
         self.sequence_parallel = args.sequence_parallel
         self.gradient_accumulation_fusion = args.gradient_accumulation_fusion
 
-
-
     def forward(self, input_):
         # Set up backprop all-reduce.
         if self.input_is_parallel:
@@ -540,28 +537,16 @@ class RowParallelLinear(torch.nn.Module):
             input_parallel, self.weight, None,
             self.gradient_accumulation_fusion, None, None)
         # All-reduce across all the partitions.
-        # output_size = sys.getsizeof(output_parallel.storage())
-        # print("\033[31m size of output_parallel before compression: \033[0m" + str(output_size))
-        if self.is_tensor_compress:
+        if self.is_tensor_compress and self.layer_number > 12:
             output_parallel = F.linear(output_parallel, self.encoder)
-            # output_parallel = F.normalize(output_parallel)
-            # print(output_parallel.size())
-        # output_size = sys.getsizeof(output_parallel.storage())
-        # print("\033[31m size of output_parallel after compression: \033[0m" + str(output_size))
-        global times, reduce_time
-        torch.cuda.synchronize()
-        start = time.time()
+
         if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
-        torch.cuda.synchronize()
-        end = time.time()
-        reduce_time = reduce_time + end - start
-        times = times + 1
-        if self.is_tensor_compress:
+        if self.is_tensor_compress and self.layer_number > 12:
             output_ = F.linear(output_, self.decoder)
-            # output_ = F.normalize(output_)
+
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
             output_bias = None

@@ -37,9 +37,9 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
-               --num-attention-heads 64 \
-               --micro-batch-size 2 \
-               --lr 5.0e-5 \
+               --num-attention-heads 16 \
+               --micro-batch-size 8 \
+               --lr 1.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
                --max-position-embeddings 512 \

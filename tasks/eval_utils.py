@@ -47,11 +47,21 @@ def accuracy_func_provider(single_dataset_provider):
         print_rank_last('calculating metrics ...')
         correct = 0
         total = 0
+        dataset_name = args.valid_data[0].split('/')[-2]
         if output_predictions:
             assert mpu.get_data_parallel_world_size() == 1
             named_predictions = []
             names = 'predictions'
         for name, dataloader in dataloaders:
+            if dataset_name == "CoLA":
+                _ = calculate_correlation_coefficient(name, model, dataloader,
+                                                      epoch, types=["Matthews"])
+            elif dataset_name == "MRPC" or dataset_name == "QQP":
+                _ = calculate_correlation_coefficient(name, model, dataloader,
+                                                      epoch, types=["F1"])
+            elif dataset_name == "STS-B":
+                _ = calculate_correlation_coefficient(name, model, dataloader,
+                                                      epoch, types=["Pearson", "Spearman"])
             output = calculate_correct_answers(name, model, dataloader,
                                                epoch, output_predictions)
             if not output_predictions:
@@ -193,3 +203,147 @@ def calculate_correct_answers(name, model, dataloader,
     if output_predictions:
         return 0, 0, ()
     return 0, 0
+
+
+def calculate_correlation_coefficient(name, model, dataloader,
+                                      epoch, types):
+    """Calculate correlation coefficient"""
+    args = get_args()
+    forward_backward_func = get_forward_backward_func()
+    start_time = time.time()
+    for m in model:
+        m.eval()
+    saved_micro_batch_size = args.micro_batch_size
+    saved_global_batch_size = args.global_batch_size
+
+    ds = dataloader.dataset
+    if hasattr(ds, 'sample_multiplier'):
+        # If our dataset as a sample_multiplier attribute that means
+        # each "sample" from the dataset actually has multiple samples
+        # that will collapse into the batch dimension (for example in
+        # the RACE dataset that has several options), we need to
+        # account for that when setting the micro batch size.
+        sample_multiplier = ds.sample_multiplier
+    else:
+        sample_multiplier = 1
+    micro_batch_size_times_data_parallel = args.orig_micro_batch_size * args.data_parallel_size
+    num_micro_batches = args.orig_global_batch_size // micro_batch_size_times_data_parallel
+
+    def loss_func(labels, output_tensor):
+        logits = output_tensor
+
+        loss_dict = {}
+        predicted = torch.argmax(logits, dim=-1)
+        loss_dict['labels'] = labels.cpu()
+        loss_dict['predicted'] = predicted.cpu()
+
+        return 0, loss_dict
+
+    # defined inside to capture output_predictions
+    def correct_answers_forward_step(batch, model):
+        try:
+            batch_ = next(batch)
+        except BaseException:
+            batch_ = batch
+        tokens, types, labels, attention_mask = process_batch(batch_)
+
+        # Forward model.
+        args = get_args()
+        output_tensor = model(tokens, attention_mask, tokentype_ids=types)
+
+        return output_tensor, partial(loss_func, labels)
+
+    with torch.no_grad():
+        # For all the batches in the dataset.
+        labels = torch.tensor([])
+        predicted = torch.tensor([])
+        for _, batch in enumerate(dataloader):
+            # For evaluation only mode we use drop_last = False to get all the
+            # samples, which means we might not have a full batch, so we
+            # adjust batch_size here to actual batch size of data
+            actual_batch_size = len(batch['label'])
+            # ... applying sample_multiplier if necessary
+            args.micro_batch_size = actual_batch_size * sample_multiplier
+            args.global_batch_size = actual_batch_size * sample_multiplier * num_micro_batches
+
+            loss_dicts = forward_backward_func(correct_answers_forward_step, batch, model,
+                                               optimizer=None, timers=None, forward_only=True)
+
+            for loss_dict in loss_dicts:
+                labels = torch.hstack((labels, loss_dict['labels']))
+                predicted = torch.hstack((predicted, loss_dict['predicted']))
+
+    for m in model:
+        m.train()
+    args.micro_batch_size = saved_micro_batch_size
+    args.global_batch_size = saved_global_batch_size
+
+    # Reduce.
+    if mpu.is_pipeline_last_stage():
+        # unreduced = torch.cuda.LongTensor([correct, total])
+        labels = labels.type(torch.long).cuda()
+        predicted = predicted.type(torch.long).cuda()
+        labels_list = [torch.zeros_like(labels) for _ in range(args.data_parallel_size)]
+        predicted_list = [torch.zeros_like(predicted) for _ in range(args.data_parallel_size)]
+        torch.distributed.all_gather(labels_list, labels,
+                                     group=mpu.get_data_parallel_group())
+        torch.distributed.all_gather(predicted_list, predicted,
+                                     group=mpu.get_data_parallel_group())
+        labels_gather = torch.tensor([])
+        predicted_gather = torch.tensor([])
+        for i in range(len(labels_list)):
+            labels_gather = torch.hstack((labels_gather, labels_list[i].cpu()))
+        for i in range(len(predicted_list)):
+            predicted_gather = torch.hstack((predicted_gather, predicted_list[i].cpu()))
+
+        predicted_gather = predicted_gather.type(torch.IntTensor)
+        labels_gather = labels_gather.type(torch.IntTensor)
+
+        # Print on screen.
+
+        elapsed_time = time.time() - start_time
+        corr = 0.0
+        for tp in types:
+            if tp == "F1":
+                from torchmetrics import F1Score
+                if args.task == "MNLI":
+                    f1 = F1Score(num_classes=3, multiclass=True)
+                elif args.task == "STS":
+                    f1 = F1Score(num_classes=5, multiclass=True)
+                else:
+                    f1 = F1Score(num_classes=2, multiclass=True)
+                corr = f1(predicted_gather, labels_gather)
+                corr = corr.numpy() * 100
+                print_rank_last(' > |epoch: {}| metrics for {}: F1 Score = {} %, '
+                                'elapsed time (sec): {:.3f}'.format(epoch, name, corr, elapsed_time))
+            elif tp == "Matthews":
+                from torchmetrics import MatthewsCorrCoef
+                if args.task == "MNLI":
+                    matthews_corrcoef = MatthewsCorrCoef(num_classes=3)
+                elif args.task == "STS":
+                    matthews_corrcoef = MatthewsCorrCoef(num_classes=5)
+                else:
+                    matthews_corrcoef = MatthewsCorrCoef(num_classes=2)
+                corr = matthews_corrcoef(predicted_gather, labels_gather)
+                corr = corr.numpy() * 100
+                print_rank_last(' > |epoch: {}| metrics for {}: Matthews Correlation = {} %, '
+                                'elapsed time (sec): {:.3f}'.format(epoch, name, corr, elapsed_time))
+            elif tp == "Pearson":
+                from torchmetrics import PearsonCorrCoef
+                pearson = PearsonCorrCoef()
+                corr = pearson(predicted_gather, labels_gather)
+                corr = corr.numpy() * 100
+                print_rank_last(' > |epoch: {}| metrics for {}: Pearson corr = {} %, '
+                                'elapsed time (sec): {:.3f}'.format(epoch, name, corr, elapsed_time))
+            elif tp == "Spearman":
+                from torchmetrics import SpearmanCorrCoef
+                spearman = SpearmanCorrCoef()
+                corr = spearman(predicted_gather, labels_gather)
+                corr = corr.numpy() * 100
+                print_rank_last(' > |epoch: {}| metrics for {}: Spearman corr = {} %, '
+                                'elapsed time (sec): {:.3f}'.format(epoch, name, corr, elapsed_time))
+            else:
+                raise ValueError("the input type is error")
+
+        return corr
+    return 0.

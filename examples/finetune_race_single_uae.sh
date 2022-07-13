@@ -17,7 +17,8 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../RACE/train/middle"
+TRAIN_DATA="../RACE/train/middle \
+            ../RACE/train/high"
 VALID_DATA="../RACE/test/middle \
             ../RACE/test/high"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
@@ -39,7 +40,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 2 \
+               --micro-batch-size 8 \
                --lr 2.0e-5 \
                --lr-warmup-fraction 0.06 \
                --seq-length 512 \

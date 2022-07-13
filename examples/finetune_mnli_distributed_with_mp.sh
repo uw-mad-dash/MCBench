@@ -24,7 +24,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --valid-data $VALID_DATA \
                --tokenizer-type BertWordPieceLowerCase \
                --vocab-file $VOCAB_FILE \
-               --epochs 5 \
+               --epochs 1 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
@@ -42,7 +42,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-dim 100 \
+               --pipeline-compress-dim 5 \
                --is-tensor-compress False \
-               --tensor-compress-dim 2
+               --tensor-compress-dim 1024
 

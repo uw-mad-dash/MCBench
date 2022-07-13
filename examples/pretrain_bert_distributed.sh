@@ -1,6 +1,15 @@
 #!/bin/bash
 
-GPUS_PER_NODE=8
+#SBATCH --job-name=bert_pretrain    # create a short name for your job
+#SBATCH --output=results/bert_pretrain.txt
+#SBATCH --nodes=1                # node count
+#SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
+#SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --mem=64G                 # total memory per node (4 GB per cpu-core is default)
+#SBATCH --gres=gpu:4            # number of gpus per node
+#SBATCH --time=202:00:00          # total run time limit (HH:MM:SS)
+
+GPUS_PER_NODE=4
 # Change for multinode config
 MASTER_ADDR=localhost
 MASTER_PORT=6000
@@ -8,13 +17,13 @@ NNODES=1
 NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
-DATA_PATH=<Specify path and file prefix>_text_sentence
-CHECKPOINT_PATH=<Specify path>
+DATA_PATH=../my-bert_text_sentence
+CHECKPOINT_PATH=checkpoints/bert_pretrain
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS \
-       pretrain_bert.py \
+       ../pretrain_bert.py \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
@@ -26,7 +35,7 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
-       --vocab-file bert-vocab.txt \
+       --vocab-file ../bert-large-cased-vocab.txt \
        --data-impl mmap \
        --split 949,50,1 \
        --distributed-backend nccl \
@@ -38,7 +47,7 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --clip-grad 1.0 \
        --lr-warmup-fraction .01 \
        --log-interval 100 \
-       --save-interval 10000 \
+       --save-interval 500000 \
        --eval-interval 1000 \
        --eval-iters 10 \
        --fp16

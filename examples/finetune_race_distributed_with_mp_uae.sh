@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=ft_race    # create a short name for your job
-#SBATCH --output=results/4_1_race_1024_1024_high.txt
+#SBATCH --output=results/4_1_race_1024_100_1_8.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -57,5 +57,5 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --fp16 \
                --is-pipeline-compress False \
                --pipeline-compress-dim 20 \
-               --is-tensor-compress False \
-               --tensor-compress-dim 20
+               --is-tensor-compress True \
+               --tensor-compress-dim 100
