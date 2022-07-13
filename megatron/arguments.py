@@ -353,6 +353,8 @@ def _add_compression_args(parser):
                        help='reduced dimension after pipeline compression.')
     group.add_argument('--is-tensor-compress', type=str2bool, default=False,
                        help='whether do tensor compression.')
+    group.add_argument('--is-quantize', type=str2bool, default=False,
+                       help='whether do quantization.')
     group.add_argument('--tensor-compress-dim', type=int, default=2,
                        help='reduced dimension after tensor compression.')
 
