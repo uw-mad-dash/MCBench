@@ -43,6 +43,8 @@ from .utils import split_tensor_along_last_dim
 from .utils import VocabUtility
 from megatron import get_args, get_global_memory_buffer
 
+from ..compression import quantize
+
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {'tensor_model_parallel': False,
                                       'partition_dim': -1,
                                       'partition_stride': 1}
@@ -473,6 +475,7 @@ class RowParallelLinear(torch.nn.Module):
         args = get_args()
         self.is_pipeline_compress = args.is_pipeline_compress
         self.is_tensor_compress = args.is_tensor_compress
+        self.is_quantize = args.is_quantize
         if args.use_cpu_initialization:
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
@@ -540,12 +543,20 @@ class RowParallelLinear(torch.nn.Module):
         if self.is_tensor_compress and self.layer_number > 12:
             output_parallel = F.linear(output_parallel, self.encoder)
 
+        if self.is_quantize:
+            q_tensor, q_scale, q_zero = quantize.quantize_tensor(output_parallel)
+            output_parallel = q_tensor
+
         if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
             output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+        
         if self.is_tensor_compress and self.layer_number > 12:
             output_ = F.linear(output_, self.decoder)
+
+        if self.is_quantize:
+            output_ = quantize.dequantize_tensor(output_, q_scale, q_zero)
 
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_

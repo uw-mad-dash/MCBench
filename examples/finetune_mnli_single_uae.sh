@@ -25,7 +25,7 @@ PRETRAINED_CHECKPOINT=checkpoints/bert_345m
 CHECKPOINT_PATH=checkpoints/bert_345m_mnli_single
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
+               --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 1 \
                --task MNLI \
                --seed 1234 \
@@ -53,4 +53,5 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --is-pipeline-compress False \
                --pipeline-compress-dim 100 \
                --is-tensor-compress False \
-               --tensor-compress-dim 100
+               --tensor-compress-dim 100 \
+               --is-quantize True \
