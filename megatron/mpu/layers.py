@@ -544,8 +544,7 @@ class RowParallelLinear(torch.nn.Module):
             output_parallel = F.linear(output_parallel, self.encoder)
 
         if self.is_quantize:
-            q_tensor, q_scale, q_zero = quantize.quantize_tensor(output_parallel)
-            output_parallel = q_tensor
+            output_parallel, scale = quantize.compress_2bit(output_parallel)
 
         if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
@@ -556,7 +555,7 @@ class RowParallelLinear(torch.nn.Module):
             output_ = F.linear(output_, self.decoder)
 
         if self.is_quantize:
-            output_ = quantize.dequantize_tensor(output_, q_scale, q_zero)
+            output_ = quantize.decompress_2bit(output_, scale)
 
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
