@@ -545,7 +545,9 @@ class RowParallelLinear(torch.nn.Module):
 
         if self.is_quantize:
             output_parallel, scale = quantize.compress_2bit(output_parallel)
-
+            #bs_, s_, h_ = output_parallel.shape
+            #float_copy = output_parallel.clone()
+            #output_parallel = torch.cuda.CharTensor(bs_* s_* h_//4)
         if self.sequence_parallel:
             output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
         else:
@@ -556,7 +558,7 @@ class RowParallelLinear(torch.nn.Module):
 
         if self.is_quantize:
             output_ = quantize.decompress_2bit(output_, scale)
-
+            #output_ = float_copy
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
             output_bias = None
