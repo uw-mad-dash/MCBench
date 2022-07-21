@@ -17,7 +17,7 @@ CHECKPOINT_PATH=checkpoints/bert_345m_mrpc
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-model-parallel-size $WORLD_SIZE \
-               --pipeline-model-parallel-size 2 \
+               --pipeline-model-parallel-size 1 \
                --task MRPC \
                --seed 1234 \
                --train-data $TRAIN_DATA \
