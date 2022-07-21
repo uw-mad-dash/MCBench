@@ -16,3 +16,4 @@ try_load.py
 try_split.py
 my-corpus.json
 examples/nsys_record
+megatron/fused_kernels/build

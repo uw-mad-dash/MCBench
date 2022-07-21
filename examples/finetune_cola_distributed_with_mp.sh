@@ -8,8 +8,8 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../glue_data/SST-2/train.tsv"
-VALID_DATA="../glue_data/SST-2/dev.tsv"
+TRAIN_DATA="../glue_data/CoLA/train.tsv"
+VALID_DATA="../glue_data/CoLA/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
 PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split
 CHECKPOINT_PATH=checkpoints/bert_345m_cola
@@ -17,7 +17,7 @@ CHECKPOINT_PATH=checkpoints/bert_345m_cola
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 2 \
-               --task SST \
+               --task CoLA \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \
@@ -42,6 +42,5 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --fp16 \
                --is-pipeline-compress False \
                --pipeline-compress-dim 1024 \
-               --is-tensor-compress True \
-               --tensor-compress-dim 100
-
+               --is-tensor-compress False \
+               --tensor-compress-dim 1024 \
