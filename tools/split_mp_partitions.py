@@ -325,7 +325,7 @@ def main():
     # unwrapped_model = unwrap_model(merged_model,
     #                                (torchDDP, LocalDDP, Float16Module))
     print(f'> loading {checkpoint_name} ...')
-    load_checkpoint(merged_model, None, None)
+    load_checkpoint(merged_model, None, None, strict=False)
     print(f'> checkpoint version {get_checkpoint_version()}')
 
     partitions = []
