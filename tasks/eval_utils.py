@@ -296,8 +296,6 @@ def calculate_correlation_coefficient(name, model, dataloader,
         for i in range(len(predicted_list)):
             predicted_gather = torch.hstack((predicted_gather, predicted_list[i].cpu()))
 
-        predicted_gather = predicted_gather.type(torch.IntTensor)
-        labels_gather = labels_gather.type(torch.IntTensor)
 
         # Print on screen.
 
@@ -312,6 +310,7 @@ def calculate_correlation_coefficient(name, model, dataloader,
                     f1 = F1Score(num_classes=5, multiclass=True)
                 else:
                     f1 = F1Score(num_classes=2, multiclass=True)
+                labels_gather = labels_gather.type(torch.IntTensor)
                 corr = f1(predicted_gather, labels_gather)
                 corr = corr.numpy() * 100
                 print_rank_last(' > |epoch: {}| metrics for {}: F1 Score = {} %, '
@@ -324,6 +323,7 @@ def calculate_correlation_coefficient(name, model, dataloader,
                     matthews_corrcoef = MatthewsCorrCoef(num_classes=5)
                 else:
                     matthews_corrcoef = MatthewsCorrCoef(num_classes=2)
+                labels_gather = labels_gather.type(torch.IntTensor)
                 corr = matthews_corrcoef(predicted_gather, labels_gather)
                 corr = corr.numpy() * 100
                 print_rank_last(' > |epoch: {}| metrics for {}: Matthews Correlation = {} %, '

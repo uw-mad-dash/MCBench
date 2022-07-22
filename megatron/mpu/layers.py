@@ -32,6 +32,7 @@ from .initialize import get_tensor_model_parallel_world_size
 from .initialize import get_tensor_model_parallel_group
 from .mappings import copy_to_tensor_model_parallel_region
 from .mappings import gather_from_tensor_model_parallel_region
+from .mappings import gather_multi_from_tensor_model_parallel_region
 from .mappings import gather_from_sequence_parallel_region
 from .mappings import reduce_from_tensor_model_parallel_region
 from .mappings import scatter_to_tensor_model_parallel_region
@@ -43,7 +44,7 @@ from .utils import split_tensor_along_last_dim
 from .utils import VocabUtility
 from megatron import get_args, get_global_memory_buffer
 
-from ..compression import quantize
+from ..compression import quantize, topk, randk
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {'tensor_model_parallel': False,
                                       'partition_dim': -1,
@@ -268,8 +269,11 @@ class LinearWithGradAccumulationAndAsyncCommunication(torch.autograd.Function):
             handle.wait()
 
         # Convert the tensor shapes to 2D for execution compatibility
-        grad_output = grad_output.view(grad_output.shape[0] * grad_output.shape[1],
-                                       grad_output.shape[2])
+        # if use QR, please use reshape here
+        grad_output = grad_output.reshape(grad_output.shape[0] * grad_output.shape[1],
+                                          grad_output.shape[2])
+        # grad_output = grad_output.view(grad_output.shape[0] * grad_output.shape[1],
+        #                                grad_output.shape[2])
         total_input = total_input.view(total_input.shape[0] * total_input.shape[1],
 				       total_input.shape[2])
  
@@ -473,21 +477,24 @@ class RowParallelLinear(torch.nn.Module):
         # we allocate the transpose.
         # Initialize weight.
         args = get_args()
-        self.is_pipeline_compress = args.is_pipeline_compress
         self.is_tensor_compress = args.is_tensor_compress
-        self.is_quantize = args.is_quantize
+        self.tensor_compress_method = args.tensor_compress_method
+        self.k = args.tensor_k
+        self.r = args.tensor_qr_r
+        self.warmup_epoch = args.warmup_epoch
+        self.warmup_iteration = args.warmup_iteration
         if args.use_cpu_initialization:
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
                                                 dtype=args.params_dtype))
-            if self.is_tensor_compress:
+            if self.tensor_compress_method == 'ae':
                 # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
                 self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.tensor_compress_dim, self.output_size,
+                    torch.empty(args.tensor_ae_dim, self.output_size,
                                 dtype=args.params_dtype))
                 )
                 self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(self.output_size, args.tensor_compress_dim,
+                    torch.empty(self.output_size, args.tensor_ae_dim,
                                 dtype=args.params_dtype))
                 )
             self.master_weight = _initialize_affine_weight_cpu(
@@ -498,14 +505,14 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(
                 self.output_size, self.input_size_per_partition,
                 device=torch.cuda.current_device(), dtype=args.params_dtype))
-            if self.is_tensor_compress:
+            if self.tensor_compress_method == 'ae':
                 # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
                 self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.tensor_compress_dim, self.output_size,
+                    torch.empty(args.tensor_ae_dim, self.output_size,
                                 device=torch.cuda.current_device(), dtype=args.params_dtype)
                 ))
                 self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(self.output_size, args.tensor_compress_dim,
+                    torch.empty(self.output_size, args.tensor_ae_dim,
                                 device=torch.cuda.current_device(), dtype=args.params_dtype)
                 ))
             _initialize_affine_weight_gpu(self.weight, init_method,
@@ -540,25 +547,105 @@ class RowParallelLinear(torch.nn.Module):
             input_parallel, self.weight, None,
             self.gradient_accumulation_fusion, None, None)
         # All-reduce across all the partitions.
-        if self.is_tensor_compress and self.layer_number > 12:
-            output_parallel = F.linear(output_parallel, self.encoder)
-
-        if self.is_quantize:
-            output_parallel, scale = quantize.compress_2bit(output_parallel)
-            #bs_, s_, h_ = output_parallel.shape
-            #float_copy = output_parallel.clone()
-            #output_parallel = torch.cuda.CharTensor(bs_* s_* h_//4)
-        if self.sequence_parallel:
-            output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+        args = get_args()
+        if args.current_epoch < self.warmup_epoch:
+            # use warmup technique here
+            if self.sequence_parallel:
+                output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+            else:
+                output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         else:
-            output_ = reduce_from_tensor_model_parallel_region(output_parallel)
-        
-        if self.is_tensor_compress and self.layer_number > 12:
-            output_ = F.linear(output_, self.decoder)
+            if self.is_tensor_compress and self.layer_number > 12:
+                if self.tensor_compress_method == 'ae':
+                    output_parallel = F.linear(output_parallel, self.encoder)
+                    if self.sequence_parallel:
+                        output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+                    else:
+                        output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+                    output_ = F.linear(output_, self.decoder)
 
-        if self.is_quantize:
-            output_ = quantize.decompress_2bit(output_, scale)
-            #output_ = float_copy
+                elif self.tensor_compress_method == 'quantize':
+                    output_parallel = output_parallel.to(torch.int16)
+                    output_parallel = output_parallel.to(torch.int8)
+                    # output_parallel, scale = quantize.compress_2bit(output_parallel)
+                    if self.sequence_parallel:
+                        output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+                    else:
+                        output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+                    # output_ = quantize.decompress_2bit(output_, scale)
+                    output_ = output_.to(torch.int16)
+                    output_ = output_.to(torch.float16)
+
+                elif self.tensor_compress_method == 'topk':
+                    value, indices, input_abs_size, input_abs_seq_size = \
+                        topk.encoder(output_parallel, k=self.k)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_list[0][i * self.k: (i + 1) * self.k]
+                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
+                        output_list.append(topk.decoder(value, indices, input_abs_size, input_abs_seq_size))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i].clone()
+
+                elif self.tensor_compress_method == 'randk':
+                    value, indices, input_abs_size, input_abs_seq_size = \
+                        randk.encoder(output_parallel, k=self.k)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_list[0][i * self.k: (i + 1) * self.k]
+                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
+                        output_list.append(randk.decoder(value, indices, input_abs_size, input_abs_seq_size))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i].clone()
+
+                elif self.tensor_compress_method == 'qr':
+                    Q = torch.randn(self.output_size,
+                                    self.r, dtype=torch.float16).cuda()
+                    P = torch.matmul(output_parallel, Q)
+                    world_size = get_tensor_model_parallel_world_size()
+                    if self.sequence_parallel:
+                        P = reduce_scatter_to_sequence_parallel_region(P)
+                    else:
+                        P = reduce_from_tensor_model_parallel_region(P)
+                    P = P.to(torch.float32)
+                    P = P.permute(1, 0, 2)
+                    P_hat = torch.linalg.qr(P).Q / world_size
+                    P_hat = P_hat.to(torch.float16)
+                    Q = torch.matmul(output_parallel.permute(1, 2, 0), P_hat)
+                    if self.sequence_parallel:
+                        Q = reduce_scatter_to_sequence_parallel_region(Q)
+                    else:
+                        Q = reduce_from_tensor_model_parallel_region(Q)
+                    Q = Q / world_size
+                    output_ = torch.matmul(P_hat, Q.permute(0, 2, 1))
+                    output_ = output_.permute(1, 0, 2)
+
+                elif self.tensor_compress_method == 'sign':
+                    # we need to do reduce sign to 2 bits here
+                    output_parallel = torch.sign(output_parallel)
+                    if self.sequence_parallel:
+                        output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+                    else:
+                        output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+                    output_ = torch.sign(output_)
+
+                else:
+                    raise ValueError("Tensor Compression Method is Wrong")
+
+            else:
+                if self.sequence_parallel:
+                    output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
+                else:
+                    output_ = reduce_from_tensor_model_parallel_region(output_parallel)
+
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_
             output_bias = None

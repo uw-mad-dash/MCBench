@@ -29,6 +29,8 @@ from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
 from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu
 
+from ..compression import quantize, topk, randk
+
 
 """ We use the following notation throughout this file:
      h: hidden size
@@ -733,6 +735,10 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         self.bias_dropout_fusion = args.bias_dropout_fusion
         self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else None
         self.is_pipeline_compress = args.is_pipeline_compress
+        self.pipeline_compress_method = args.pipeline_compress_method
+        self.pipeline_ae_dim = args.pipeline_ae_dim
+        self.r = args.pipeline_qr_r
+        self.k = args.pipeline_k
 
         # Layernorm on the attention output
         self.post_attention_layernorm = LayerNorm(
@@ -770,7 +776,7 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         if self.is_pipeline_compress:
             # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
             self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                torch.empty(args.pipeline_compress_dim, args.hidden_size,
+                torch.empty(args.pipeline_ae_dim, args.hidden_size,
                             dtype=args.params_dtype)
             ))
 
@@ -866,7 +872,32 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             output = residual + self.drop_path(out)
 
         if self.is_pipeline_compress:
-            output = F.linear(output, self.encoder)
+            args = get_args()
+            if self.pipeline_compress_method == 'ae':
+                output = F.linear(output, self.encoder)
+            elif self.pipeline_compress_method == 'topk':
+                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value = value.to(torch.float64)
+                output = torch.stack((value, indices), 0)
+            elif self.pipeline_compress_method == 'randk':
+                value, indices, _, _ = randk.encoder(output, k=self.k)
+                value = value.to(torch.float64)
+                output = torch.stack((value, indices), 0)
+            elif self.pipeline_compress_method == 'qr':
+                Q = torch.randn(args.hidden_size,
+                                self.r, dtype=torch.float16).cuda()
+                P = torch.matmul(output, Q)
+                P = P.to(torch.float32)
+                P = P.permute(1, 0, 2)
+                P_hat = torch.linalg.qr(P).Q
+                P_hat = P_hat.to(torch.float16)
+                Q = torch.matmul(output.permute(1, 2, 0), P_hat)
+                output = torch.cat((P_hat, Q), 1)
+            elif self.pipeline_compress_method == 'quantize':
+                output = output.to(torch.int16)
+                output = output.to(torch.int8)
+            else:
+                raise ValueError("Pipeline Compression Method is Wrong")
             # output = F.normalize(output)
 
         return output
@@ -913,6 +944,10 @@ class ParallelTransformerDecoderLayer(MegatronModule):
         self.bias_dropout_fusion = args.bias_dropout_fusion
         self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else None
         self.is_pipeline_compress = args.is_pipeline_compress
+        self.pipeline_compress_method = args.pipeline_compress_method
+        self.pipeline_ae_dim = args.pipeline_ae_dim
+        self.pipeline_qr_r = args.pipeline_qr_r
+        self.pipeline_k = args.pipeline_k
 
         # Layernorm on the attention output
         self.post_attention_layernorm = LayerNorm(
@@ -950,7 +985,7 @@ class ParallelTransformerDecoderLayer(MegatronModule):
         if self.is_pipeline_compress:
             # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
             self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                torch.empty(args.hidden_size, args.pipeline_compress_dim,
+                torch.empty(args.hidden_size, args.pipeline_ae_dim,
                             dtype=args.params_dtype))
             )
 
@@ -960,7 +995,34 @@ class ParallelTransformerDecoderLayer(MegatronModule):
         # hidden_states: [s, b, h]
 
         if self.is_pipeline_compress:
-            hidden_states = F.linear(hidden_states, self.decoder)
+            args = get_args()
+            if self.pipeline_compress_method == 'ae':
+                hidden_states = F.linear(hidden_states, self.decoder)
+            elif self.pipeline_compress_method == 'topk':
+                value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                input_abs_seq_size = torch.Size([args.seq_length *
+                                                 args.micro_batch_size *
+                                                 args.hidden_size])
+                hidden_states = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+            elif self.pipeline_compress_method == 'randk':
+                value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                input_abs_seq_size = torch.Size([args.seq_length *
+                                                 args.micro_batch_size *
+                                                 args.hidden_size])
+                hidden_states = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+            elif self.pipeline_compress_method == 'qr':
+                split = torch.split(hidden_states, [args.seq_length, args.hidden_size], 1)
+                P_hat = split[0]
+                Q = split[1]
+                hidden_states = torch.matmul(P_hat, Q.permute(0, 2, 1))
+                hidden_states = hidden_states.permute(1, 0, 2)
+            elif self.pipeline_compress_method == 'quantize':
+                hidden_states = hidden_states.to(torch.int16)
+                hidden_states = hidden_states.to(torch.float16)
+            else:
+                raise ValueError("Pipeline Compression Method is Wrong")
             # hidden_states = F.normalize(hidden_states)
 
         # Layer norm at the beginning of the transformer layer.

@@ -349,14 +349,32 @@ def _add_compression_args(parser):
 
     group.add_argument('--is-pipeline-compress', type=str2bool, default=False,
                        help='whether do pipeline compression.')
-    group.add_argument('--pipeline-compress-dim', type=int, default=2,
+    group.add_argument('--pipeline-compress-method', type=str, default='ae',
+                       help='pipeline compression method: ae, quantize, topk, randk, qr, and sign')
+    group.add_argument('--pipeline-ae-dim', type=int, default=2,
                        help='reduced dimension after pipeline compression.')
+    group.add_argument('--pipeline-k', type=int, default=10000,
+                       help='choose value k for top-k and rand-k compression')
+    group.add_argument('--pipeline-qr-r', type=int, default=10,
+                       help='choose value r for QR decomposition')
     group.add_argument('--is-tensor-compress', type=str2bool, default=False,
-                       help='whether do tensor compression.')
-    group.add_argument('--is-quantize', type=str2bool, default=False,
-                       help='whether do quantization.')
-    group.add_argument('--tensor-compress-dim', type=int, default=2,
+                       help='whether do tensor compression')
+    group.add_argument('--tensor-compress-method', type=str, default='ae',
+                       help='tensor compression method: ae, quantize, topk, randk, qr, and sign')
+    group.add_argument('--tensor-ae-dim', type=int, default=2,
                        help='reduced dimension after tensor compression.')
+    group.add_argument('--tensor-k', type=int, default=10000,
+                       help='choose value k for top-k and rand-k compression')
+    group.add_argument('--tensor-qr-r', type=int, default=10,
+                       help='choose value r for QR decomposition')
+    group.add_argument('--warmup_epoch', type=int, default=0,
+                       help='do compression after warmup epoch')
+    group.add_argument('--current_epoch', type=int, default=0,
+                       help='current epoch')
+    group.add_argument('--warmup_iteration', type=int, default=300,
+                       help='do compression after warmup iteration')
+    group.add_argument('--current_iteration', type=int, default=0,
+                       help='current iteration')
 
     return parser
 
