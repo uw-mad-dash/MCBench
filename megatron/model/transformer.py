@@ -18,6 +18,7 @@ import math
 from contextlib import nullcontext
 import torch
 import torch.nn.functional as F
+from scipy.linalg import hadamard
 from torch.nn.parameter import Parameter
 
 from megatron import get_timers, get_args, get_global_memory_buffer
@@ -29,7 +30,7 @@ from megatron.model.fused_softmax import FusedScaleMaskSoftmax
 from megatron.model.fused_bias_gelu import bias_gelu_impl
 from megatron.model.utils import attention_mask_func, openai_gelu, erf_gelu
 
-from ..compression import quantize, topk, randk
+from ..compression import quantize, topk, randk, srht, ct
 
 
 """ We use the following notation throughout this file:
@@ -774,11 +775,14 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 nullcontext if use_nvfuser else torch.enable_grad
 
         if self.is_pipeline_compress:
-            # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-            self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                torch.empty(args.pipeline_ae_dim, args.hidden_size,
-                            dtype=args.params_dtype)
-            ))
+            if self.pipeline_compress_method == 'ae':
+                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(args.pipeline_ae_dim, args.hidden_size,
+                                dtype=args.params_dtype)
+                ))
+            elif self.pipeline_compress_method == 'srht':
+                self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
@@ -883,6 +887,20 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 value, indices, _, _ = randk.encoder(output, k=self.k)
                 value = value.to(torch.float64)
                 output = torch.stack((value, indices), 0)
+            elif self.pipeline_compress_method == 'srht':
+                compress_output, S = srht.encoder(output, self.H_tensor,
+                                                  d=args.hidden_size, m=args.pipeline_m)
+                compress_output = torch.reshape(
+                    compress_output, (args.seq_length * args.micro_batch_size, args.pipeline_m)
+                )
+                output = torch.cat((compress_output, S.T), 0)
+            elif self.pipeline_compress_method == 'ct':
+                compress_output, S = ct.encoder(output,
+                                                d=args.hidden_size, m=args.pipeline_m)
+                compress_output = torch.reshape(
+                    compress_output, (args.seq_length * args.micro_batch_size, args.pipeline_m)
+                )
+                output = torch.cat((compress_output, S.T), 0)
             elif self.pipeline_compress_method == 'qr':
                 Q = torch.randn(args.hidden_size,
                                 self.r, dtype=torch.float16).cuda()
@@ -983,11 +1001,12 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 nullcontext if use_nvfuser else torch.enable_grad
 
         if self.is_pipeline_compress:
-            # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-            self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                torch.empty(args.hidden_size, args.pipeline_ae_dim,
-                            dtype=args.params_dtype))
-            )
+            if self.pipeline_compress_method == 'ae':
+                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                    torch.empty(args.hidden_size, args.pipeline_ae_dim,
+                                dtype=args.params_dtype))
+                )
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
@@ -1012,6 +1031,20 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                                                  args.micro_batch_size *
                                                  args.hidden_size])
                 hidden_states = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+            elif self.pipeline_compress_method == 'srht':
+                output_compress, S_T = hidden_states[:args.seq_length * args.micro_batch_size, :], \
+                                       hidden_states[args.seq_length * args.micro_batch_size:, :]
+                output_compress = torch.reshape(
+                    output_compress, (args.seq_length, args.micro_batch_size, args.pipeline_m)
+                )
+                hidden_states = srht.decoder(output_compress, S_T.T)
+            elif self.pipeline_compress_method == 'ct':
+                output_compress, S_T = hidden_states[:args.seq_length * args.micro_batch_size, :], \
+                                       hidden_states[args.seq_length * args.micro_batch_size:, :]
+                output_compress = torch.reshape(
+                    output_compress, (args.seq_length, args.micro_batch_size, args.pipeline_m)
+                )
+                hidden_states = ct.decoder(output_compress, S_T.T)
             elif self.pipeline_compress_method == 'qr':
                 split = torch.split(hidden_states, [args.seq_length, args.hidden_size], 1)
                 P_hat = split[0]

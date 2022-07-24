@@ -353,6 +353,8 @@ def _add_compression_args(parser):
                        help='pipeline compression method: ae, quantize, topk, randk, qr, and sign')
     group.add_argument('--pipeline-ae-dim', type=int, default=2,
                        help='reduced dimension after pipeline compression.')
+    group.add_argument('--pipeline-m', type=int, default=10,
+                       help='choose value m for srht and ct compression')
     group.add_argument('--pipeline-k', type=int, default=10000,
                        help='choose value k for top-k and rand-k compression')
     group.add_argument('--pipeline-qr-r', type=int, default=10,
@@ -363,6 +365,8 @@ def _add_compression_args(parser):
                        help='tensor compression method: ae, quantize, topk, randk, qr, and sign')
     group.add_argument('--tensor-ae-dim', type=int, default=2,
                        help='reduced dimension after tensor compression.')
+    group.add_argument('--tensor-m', type=int, default=10,
+                       help='choose value m for srht and ct compression')
     group.add_argument('--tensor-k', type=int, default=10000,
                        help='choose value k for top-k and rand-k compression')
     group.add_argument('--tensor-qr-r', type=int, default=10,

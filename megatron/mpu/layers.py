@@ -25,6 +25,7 @@ import time
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
+from scipy.linalg import hadamard
 from torch.nn.parameter import Parameter
 
 from .initialize import get_tensor_model_parallel_rank
@@ -44,7 +45,7 @@ from .utils import split_tensor_along_last_dim
 from .utils import VocabUtility
 from megatron import get_args, get_global_memory_buffer
 
-from ..compression import quantize, topk, randk
+from ..compression import quantize, topk, randk, srht, ct
 
 _MODEL_PARALLEL_ATTRIBUTE_DEFAULTS = {'tensor_model_parallel': False,
                                       'partition_dim': -1,
@@ -479,6 +480,7 @@ class RowParallelLinear(torch.nn.Module):
         args = get_args()
         self.is_tensor_compress = args.is_tensor_compress
         self.tensor_compress_method = args.tensor_compress_method
+        self.m = args.tensor_m
         self.k = args.tensor_k
         self.r = args.tensor_qr_r
         self.warmup_epoch = args.warmup_epoch
@@ -497,6 +499,8 @@ class RowParallelLinear(torch.nn.Module):
                     torch.empty(self.output_size, args.tensor_ae_dim,
                                 dtype=args.params_dtype))
                 )
+            elif self.tensor_compress_method == 'srht':
+                self.H_tensor = torch.tensor(hadamard(self.output_size), dtype=args.params_dtype)
             self.master_weight = _initialize_affine_weight_cpu(
                 self.weight, self.output_size, self.input_size,
                 self.input_size_per_partition, 1, init_method,
@@ -515,6 +519,9 @@ class RowParallelLinear(torch.nn.Module):
                     torch.empty(self.output_size, args.tensor_ae_dim,
                                 device=torch.cuda.current_device(), dtype=args.params_dtype)
                 ))
+            elif self.tensor_compress_method == 'srht':
+                self.H_tensor = torch.tensor(hadamard(self.output_size),
+                                             device=torch.cuda.current_device(), dtype=args.params_dtype)
             _initialize_affine_weight_gpu(self.weight, init_method,
                                           partition_dim=1, stride=stride)
         if bias:
@@ -605,6 +612,35 @@ class RowParallelLinear(torch.nn.Module):
                     for i in range(len(output_list)):
                         if i != 0:
                             output_ = output_ + output_list[i].clone()
+
+                elif self.tensor_compress_method == 'srht':
+                    compress_tensor, S = srht.encoder(output_parallel, self.H_tensor,
+                                                      d=self.output_size, m=self.m)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([compress_tensor, S])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        compress_tensor = gather_list[0][:, :, i * self.m: (i + 1) * self.m]
+                        S = gather_list[1][:, i * self.output_size: (i + 1) * self.output_size]
+                        output_list.append(srht.decoder(compress_tensor, S))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == 'ct':
+                    compress_tensor, S = ct.encoder(output_parallel, d=self.output_size, m=self.m)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([compress_tensor, S])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        compress_tensor = gather_list[0][:, :, i * self.m: (i + 1) * self.m]
+                        S = gather_list[1][:, i * self.output_size: (i + 1) * self.output_size]
+                        output_list.append(ct.decoder(compress_tensor, S))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
 
                 elif self.tensor_compress_method == 'qr':
                     Q = torch.randn(self.output_size,

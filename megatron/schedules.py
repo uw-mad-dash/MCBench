@@ -543,6 +543,12 @@ def get_tensor_shapes(rank, model_type):
                 tensor_shapes.append((2, args.pipeline_k))
             elif args.pipeline_compress_method == 'randk':
                 tensor_shapes.append((2, args.pipeline_k))
+            elif args.pipeline_compress_method == 'srht':
+                tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
+                                      args.pipeline_m))
+            elif args.pipeline_compress_method == 'ct':
+                tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
+                                      args.pipeline_m))
             elif args.pipeline_compress_method == 'qr':
                 tensor_shapes.append((args.micro_batch_size,
                                       args.hidden_size + seq_length, args.pipeline_qr_r))
