@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# compress method in [ae, quantize, topk, randk, qr]
+# compress method in [ae, quantize, topk, randk, topkfeed, randkfeed, qr]
 
 WORLD_SIZE=4
 
@@ -10,8 +10,8 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../glue_data/RTE/train.tsv"
-VALID_DATA="../glue_data/RTE/dev.tsv"
+TRAIN_DATA="../glue_data/CoLA/train.tsv"
+VALID_DATA="../glue_data/CoLA/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
 PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split
 CHECKPOINT_PATH=checkpoints/bert_345m_cola
@@ -19,7 +19,7 @@ CHECKPOINT_PATH=checkpoints/bert_345m_cola
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 2 \
-               --task RTE \
+               --task CoLA \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \
@@ -43,15 +43,15 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method srht \
+               --pipeline-compress-method randk_feedback \
                --pipeline-ae-dim 1024 \
                --pipeline-qr-r 10 \
-               --pipeline-k 1000 \
+               --pipeline-k 10000 \
                --pipeline-m 50 \
-               --is-tensor-compress True \
-               --tensor-compress-method topkf \
+               --is-tensor-compress False \
+               --tensor-compress-method randk_feedback \
                --tensor-ae-dim 100 \
                --tensor-qr-r 10 \
-               --tensor-k 1000 \
+               --tensor-k 10000 \
                --tensor-m 50 \
 

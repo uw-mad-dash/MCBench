@@ -56,12 +56,14 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --attention-dropout 0.1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method ae \
+               --pipeline-compress-method srht \
                --pipeline-ae-dim 1024 \
                --pipeline-qr-r 10 \
-               --pipeline-k 1000 \
+               --pipeline-k 10000 \
+               --pipeline-m 50 \
                --is-tensor-compress True \
-               --tensor-compress-method quantize \
+               --tensor-compress-method topk \
                --tensor-ae-dim 100 \
                --tensor-qr-r 10 \
-               --tensor-k 1000 \
+               --tensor-k 10000 \
+               --tensor-m 50 \

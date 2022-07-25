@@ -18,6 +18,7 @@
 # repo: https://github.com/pytorch/pytorch
 
 
+import gc
 import math
 
 import sys
@@ -501,6 +502,18 @@ class RowParallelLinear(torch.nn.Module):
                 )
             elif self.tensor_compress_method == 'srht':
                 self.H_tensor = torch.tensor(hadamard(self.output_size), dtype=args.params_dtype)
+            elif self.tensor_compress_method == 'topk_feedback':
+                self.error_feedback = Parameter(
+                    torch.zeros(args.seq_length, args.micro_batch_size,
+                                args.hidden_size, dtype=args.params_dtype),
+                    requires_grad=False
+                )
+            elif self.tensor_compress_method == 'randk_feedback':
+                self.error_feedback = Parameter(
+                    torch.zeros(args.seq_length, args.micro_batch_size,
+                                args.hidden_size, dtype=args.params_dtype),
+                    requires_grad=False
+                )
             self.master_weight = _initialize_affine_weight_cpu(
                 self.weight, self.output_size, self.input_size,
                 self.input_size_per_partition, 1, init_method,
@@ -522,6 +535,18 @@ class RowParallelLinear(torch.nn.Module):
             elif self.tensor_compress_method == 'srht':
                 self.H_tensor = torch.tensor(hadamard(self.output_size),
                                              device=torch.cuda.current_device(), dtype=args.params_dtype)
+            elif self.tensor_compress_method == 'topk_feedback':
+                self.error_feedback = Parameter(
+                    torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                device=torch.cuda.current_device(), dtype=args.params_dtype),
+                    requires_grad=False
+                )
+            elif self.tensor_compress_method == 'randk_feedback':
+                self.error_feedback = Parameter(
+                    torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                device=torch.cuda.current_device(), dtype=args.params_dtype),
+                    requires_grad=False
+                )
             _initialize_affine_weight_gpu(self.weight, init_method,
                                           partition_dim=1, stride=stride)
         if bias:
@@ -596,7 +621,24 @@ class RowParallelLinear(torch.nn.Module):
                     output_ = output_list[0]
                     for i in range(len(output_list)):
                         if i != 0:
-                            output_ = output_ + output_list[i].clone()
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == 'topk_feedback':
+                    batch_size = output_parallel.size()[1]
+                    value, indices, input_abs_size, input_abs_seq_size, self.error_feedback[:, :batch_size, :].data = \
+                        topk.encoder_feedback(output_parallel + self.error_feedback[:, :batch_size, :],
+                                              k=self.k)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_list[0][i * self.k: (i + 1) * self.k]
+                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
+                        output_list.append(topk.decoder(value, indices, input_abs_size, input_abs_seq_size))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
 
                 elif self.tensor_compress_method == 'randk':
                     value, indices, input_abs_size, input_abs_seq_size = \
@@ -611,7 +653,24 @@ class RowParallelLinear(torch.nn.Module):
                     output_ = output_list[0]
                     for i in range(len(output_list)):
                         if i != 0:
-                            output_ = output_ + output_list[i].clone()
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == 'randk_feedback':
+                    batch_size = output_parallel.size()[1]
+                    value, indices, input_abs_size, input_abs_seq_size, self.error_feedback[:, :batch_size, :].data = \
+                        randk.encoder_feedback(output_parallel + self.error_feedback[:, :batch_size, :],
+                                               k=self.k)
+                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_list[0][i * self.k: (i + 1) * self.k]
+                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
+                        output_list.append(randk.decoder(value, indices, input_abs_size, input_abs_seq_size))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
 
                 elif self.tensor_compress_method == 'srht':
                     compress_tensor, S = srht.encoder(output_parallel, self.H_tensor,
