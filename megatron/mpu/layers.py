@@ -490,30 +490,31 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
                                                 dtype=args.params_dtype))
-            if self.tensor_compress_method == 'ae':
-                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.tensor_ae_dim, self.output_size,
-                                dtype=args.params_dtype))
-                )
-                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(self.output_size, args.tensor_ae_dim,
-                                dtype=args.params_dtype))
-                )
-            elif self.tensor_compress_method == 'srht':
-                self.H_tensor = torch.tensor(hadamard(self.output_size), dtype=args.params_dtype)
-            elif self.tensor_compress_method == 'topk_feedback':
-                self.error_feedback = Parameter(
-                    torch.zeros(args.seq_length, args.micro_batch_size,
-                                args.hidden_size, dtype=args.params_dtype),
-                    requires_grad=False
-                )
-            elif self.tensor_compress_method == 'randk_feedback':
-                self.error_feedback = Parameter(
-                    torch.zeros(args.seq_length, args.micro_batch_size,
-                                args.hidden_size, dtype=args.params_dtype),
-                    requires_grad=False
-                )
+            if self.is_tensor_compress:
+                if self.tensor_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.tensor_ae_dim, self.output_size,
+                                    dtype=args.params_dtype))
+                    )
+                    self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(self.output_size, args.tensor_ae_dim,
+                                    dtype=args.params_dtype))
+                    )
+                elif self.tensor_compress_method == 'srht':
+                    self.H_tensor = torch.tensor(hadamard(self.output_size), dtype=args.params_dtype)
+                elif self.tensor_compress_method == 'topk_feedback':
+                    self.error_feedback = Parameter(
+                        torch.zeros(args.seq_length, args.micro_batch_size,
+                                    args.hidden_size, dtype=args.params_dtype),
+                        requires_grad=False
+                    )
+                elif self.tensor_compress_method == 'randk_feedback':
+                    self.error_feedback = Parameter(
+                        torch.zeros(args.seq_length, args.micro_batch_size,
+                                    args.hidden_size, dtype=args.params_dtype),
+                        requires_grad=False
+                    )
             self.master_weight = _initialize_affine_weight_cpu(
                 self.weight, self.output_size, self.input_size,
                 self.input_size_per_partition, 1, init_method,
@@ -522,31 +523,32 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(
                 self.output_size, self.input_size_per_partition,
                 device=torch.cuda.current_device(), dtype=args.params_dtype))
-            if self.tensor_compress_method == 'ae':
-                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.tensor_ae_dim, self.output_size,
-                                device=torch.cuda.current_device(), dtype=args.params_dtype)
-                ))
-                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(self.output_size, args.tensor_ae_dim,
-                                device=torch.cuda.current_device(), dtype=args.params_dtype)
-                ))
-            elif self.tensor_compress_method == 'srht':
-                self.H_tensor = torch.tensor(hadamard(self.output_size),
-                                             device=torch.cuda.current_device(), dtype=args.params_dtype)
-            elif self.tensor_compress_method == 'topk_feedback':
-                self.error_feedback = Parameter(
-                    torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                device=torch.cuda.current_device(), dtype=args.params_dtype),
-                    requires_grad=False
-                )
-            elif self.tensor_compress_method == 'randk_feedback':
-                self.error_feedback = Parameter(
-                    torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                device=torch.cuda.current_device(), dtype=args.params_dtype),
-                    requires_grad=False
-                )
+            if self.is_tensor_compress:
+                if self.tensor_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.tensor_ae_dim, self.output_size,
+                                    device=torch.cuda.current_device(), dtype=args.params_dtype)
+                    ))
+                    self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(self.output_size, args.tensor_ae_dim,
+                                    device=torch.cuda.current_device(), dtype=args.params_dtype)
+                    ))
+                elif self.tensor_compress_method == 'srht':
+                    self.H_tensor = torch.tensor(hadamard(self.output_size),
+                                                 device=torch.cuda.current_device(), dtype=args.params_dtype)
+                elif self.tensor_compress_method == 'topk_feedback':
+                    self.error_feedback = Parameter(
+                        torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                    device=torch.cuda.current_device(), dtype=args.params_dtype),
+                        requires_grad=False
+                    )
+                elif self.tensor_compress_method == 'randk_feedback':
+                    self.error_feedback = Parameter(
+                        torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                    device=torch.cuda.current_device(), dtype=args.params_dtype),
+                        requires_grad=False
+                    )
             _initialize_affine_weight_gpu(self.weight, init_method,
                                           partition_dim=1, stride=stride)
         if bias:
