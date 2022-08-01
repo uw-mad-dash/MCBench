@@ -325,7 +325,7 @@ def main():
     # unwrapped_model = unwrap_model(merged_model,
     #                                (torchDDP, LocalDDP, Float16Module))
     print(f'> loading {checkpoint_name} ...')
-    load_checkpoint(merged_model, None, None, strict=False)
+    load_checkpoint(merged_model, None, None, strict=True)
     print(f'> checkpoint version {get_checkpoint_version()}')
 
     partitions = []
@@ -342,7 +342,7 @@ def main():
 
     layer_re = re.compile('layers\.([0-9]+)')
 
-    if args.pipeline_model_parallel_size > 1:
+    if args.pipeline_model_parallel_size >= 1:
         merged_params = {}
         for name, merged_param in merged_model[0].named_parameters():
             merged_params[name] = merged_param
