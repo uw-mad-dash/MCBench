@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Processing data for pretraining."""
+"""Processing data for pretraining, when the dataset contains .json and .txt files"""
 
 import argparse
 import json
@@ -179,38 +179,70 @@ def main():
     print(len(file_list))
     i = 1
     for filename in file_list:
-        with open(filename, 'r', encoding='utf-8') as file:
-            for line in file:
-                line = line.rstrip('\n')
-                data = json.loads(line)
-                ids = {}
-                for key in args.json_keys:
-                    text = data[key]
-                    doc_ids = []
-                    for sentence in splitter.tokenize(text):
-                        sentence_ids = tokenizer.tokenize(sentence)
-                        if len(sentence_ids) > 0:
-                            doc_ids.append(sentence_ids)
-                    if len(doc_ids) > 0 and args.append_eod:
-                        doc_ids[-1].append(tokenizer.eod)
-                    ids[key] = doc_ids
-                doc = ids
-                bytes_processed = len(line)
-                total_bytes_processed += bytes_processed
-                for key, sentences in doc.items():
-                    if len(sentences) == 0:
-                        continue
-                    for sentence in sentences:
-                        builders[key].add_item(torch.IntTensor(sentence))
-                    builders[key].end_document()
-                if i % args.log_interval == 0:
-                    current = time.time()
-                    elapsed = current - proc_start
-                    mbs = total_bytes_processed / elapsed / 1024 / 1024
-                    print(f"Processed {i} documents",
-                          f"({i / elapsed} docs/s, {mbs} MB/s).",
-                          file=sys.stderr)
-                i = i + 1
+        if filename.endswith("txt") or filename.endswith("data"):
+            with open(filename, 'r', encoding='utf-8') as file:
+                for line in file:
+                    text = line.rstrip('\n')
+                    ids = {}
+                    for key in args.json_keys:
+                        doc_ids = []
+                        for sentence in splitter.tokenize(text):
+                            sentence_ids = tokenizer.tokenize(sentence)
+                            if len(sentence_ids) > 0:
+                                doc_ids.append(sentence_ids)
+                        if len(doc_ids) > 0 and args.append_eod:
+                            doc_ids[-1].append(tokenizer.eod)
+                        ids[key] = doc_ids
+                    doc = ids
+                    bytes_processed = len(line)
+                    total_bytes_processed += bytes_processed
+                    for key, sentences in doc.items():
+                        if len(sentences) == 0:
+                            continue
+                        for sentence in sentences:
+                            builders[key].add_item(torch.IntTensor(sentence))
+                        builders[key].end_document()
+                    if i % args.log_interval == 0:
+                        current = time.time()
+                        elapsed = current - proc_start
+                        mbs = total_bytes_processed / elapsed / 1024 / 1024
+                        print(f"Processed {i} documents",
+                              f"({i / elapsed} docs/s, {mbs} MB/s).",
+                              file=sys.stderr)
+                    i = i + 1
+        else:
+            with open(filename, 'r', encoding='utf-8') as file:
+                for line in file:
+                    line = line.rstrip('\n')
+                    data = json.loads(line)
+                    ids = {}
+                    for key in args.json_keys:
+                        text = data[key]
+                        doc_ids = []
+                        for sentence in splitter.tokenize(text):
+                            sentence_ids = tokenizer.tokenize(sentence)
+                            if len(sentence_ids) > 0:
+                                doc_ids.append(sentence_ids)
+                        if len(doc_ids) > 0 and args.append_eod:
+                            doc_ids[-1].append(tokenizer.eod)
+                        ids[key] = doc_ids
+                    doc = ids
+                    bytes_processed = len(line)
+                    total_bytes_processed += bytes_processed
+                    for key, sentences in doc.items():
+                        if len(sentences) == 0:
+                            continue
+                        for sentence in sentences:
+                            builders[key].add_item(torch.IntTensor(sentence))
+                        builders[key].end_document()
+                    if i % args.log_interval == 0:
+                        current = time.time()
+                        elapsed = current - proc_start
+                        mbs = total_bytes_processed / elapsed / 1024 / 1024
+                        print(f"Processed {i} documents",
+                              f"({i / elapsed} docs/s, {mbs} MB/s).",
+                              file=sys.stderr)
+                    i = i + 1
 
     for key in args.json_keys:
         builders[key].finalize(output_idx_files[key])

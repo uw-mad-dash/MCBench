@@ -6,7 +6,7 @@ TARGET_TENSOR_MODEL_PARALLEL_SIZE=4
 VOCAB_FILE=../bert-large-cased-vocab.txt
 CHECKPOINT_PATH=../examples/checkpoints/bert_345m
 
-WORLD_SIZE=4
+WORLD_SIZE=1
 
 DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --nnodes 1 \
