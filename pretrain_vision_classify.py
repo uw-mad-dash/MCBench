@@ -19,7 +19,7 @@ import torch
 import torch.nn.functional as F
 from functools import partial
 from megatron import get_args, get_timers, mpu, print_rank_0
-from megatron.data.vit_dataset import build_train_valid_datasets
+from megatron.data.vit_dataset import build_train_valid_datasets, build_train_valid_test_datasets
 from megatron.model import ModelType
 from megatron.model.vision.classification import VitClassificationModel
 from megatron.model.vision.classification import MitClassificationModel
@@ -50,11 +50,24 @@ def model_provider(pre_process=True, post_process=True):
 
 def get_batch(data_iterator):
     """Build the batch."""
-    data = next(data_iterator)
 
-    # only data parallelism; no need for broadcast
-    images = data[0].cuda()
-    labels = data[1].cuda()
+    # Items and their type.
+    keys = ['images', 'labels']
+    datatype = torch.float16
+
+    # Broadcast data.
+    if data_iterator is not None:
+        data = next(data_iterator)
+        data_dict = {}
+        data_dict['images'] = data[0]
+        data_dict['labels'] = data[1].to(torch.float16)
+    else:
+        data = None
+        data_dict = None
+
+    data_b = mpu.broadcast_data(keys, data_dict, datatype)
+    images = data_b['images']
+    labels = data_b['labels'].to(torch.int64)
 
     return images, labels
 

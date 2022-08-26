@@ -260,3 +260,50 @@ def build_train_valid_datasets(data_path, image_size=224):
     val_data = RandomSeedDataset(val_data)
 
     return train_data, val_data
+
+
+def build_train_valid_test_datasets(data_path, image_size=224):
+    args = get_args()
+
+    if args.vision_pretraining_type == 'classify':
+        train_transform = ClassificationTransform(image_size)
+        val_transform = ClassificationTransform(image_size, train=False)
+        test_transform = ClassificationTransform(image_size, train=False)
+    elif args.vision_pretraining_type == 'inpaint':
+        train_transform = InpaintingTransform(image_size, train=True)
+        val_transform = InpaintingTransform(image_size, train=False)
+        test_transform = InpaintingTransform(image_size, train=False)
+    elif args.vision_pretraining_type == 'dino':
+        train_transform = DinoTransform(image_size, train=True)
+        val_transform = ClassificationTransform(image_size, train=False)
+        test_transform = ClassificationTransform(image_size, train=False)
+    else:
+        raise Exception('{} vit pretraining type is not supported.'.format(
+                args.vit_pretraining_type))
+
+    # training dataset
+    train_data_path = data_path[0] if len(data_path) <= 3 else data_path[3]
+    train_data = ImageFolder(
+        root=train_data_path,
+        transform=train_transform,
+        classes_fraction=args.classes_fraction,
+        data_per_class_fraction=args.data_per_class_fraction
+    )
+    train_data = RandomSeedDataset(train_data)
+
+    # validation dataset
+    val_data_path = data_path[1]
+    val_data = ImageFolder(
+        root=val_data_path,
+        transform=val_transform
+    )
+    val_data = RandomSeedDataset(val_data)
+
+    test_data_path = data_path[2]
+    test_data = ImageFolder(
+        root=test_data_path,
+        transform=test_transform
+    )
+    test_data = RandomSeedDataset(test_data)
+
+    return train_data, val_data, test_data

@@ -57,8 +57,12 @@ def _communicate(tensor_send_next, tensor_send_prev, recv_prev, recv_next,
     # Some legacy inference code doesn't set the tensor shape, do so now
     # for the normal values for gpt/bert. This could be removed if inference
     # code is changed to provide tensor_shape.
-    if tensor_shape is None:
-        tensor_shape = (args.seq_length, args.micro_batch_size, args.hidden_size)
+    if args.is_vision_train:
+        if tensor_shape is None:
+            tensor_shape = (args.micro_batch_size, args.hidden_size)
+    else:
+        if tensor_shape is None:
+            tensor_shape = (args.seq_length, args.micro_batch_size, args.hidden_size)
 
     override_scatter_gather_tensors_in_pipeline = False
     if args.scatter_gather_tensors_in_pipeline and \

@@ -530,30 +530,40 @@ def get_tensor_shapes(rank, model_type):
         else:
             decoder_seq_length = args.decoder_seq_length
 
-        if mpu.is_pipeline_stage_before_split(rank):
-            tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+        if args.is_vision_train:
+            if mpu.is_pipeline_stage_before_split(rank):
+                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
+            else:
+                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
+                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
         else:
-            tensor_shapes.append((decoder_seq_length, args.micro_batch_size, args.hidden_size))
-            tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+            if mpu.is_pipeline_stage_before_split(rank):
+                tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+            else:
+                tensor_shapes.append((decoder_seq_length, args.micro_batch_size, args.hidden_size))
+                tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     else:
-        if args.is_pipeline_compress:
-            if args.pipeline_compress_method == 'ae':
-                tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
-            elif args.pipeline_compress_method == 'topk':
-                tensor_shapes.append((2, args.pipeline_k))
-            elif args.pipeline_compress_method == 'randk':
-                tensor_shapes.append((2, args.pipeline_k))
-            elif args.pipeline_compress_method == 'srht':
-                tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
-                                      args.pipeline_m))
-            elif args.pipeline_compress_method == 'ct':
-                tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
-                                      args.pipeline_m))
-            elif args.pipeline_compress_method == 'qr':
-                tensor_shapes.append((args.micro_batch_size,
-                                      args.hidden_size + seq_length, args.pipeline_qr_r))
+        if args.is_vision_train:
+            tensor_shapes.append((args.micro_batch_size, args.hidden_size))
         else:
-            tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+            if args.is_pipeline_compress:
+                if args.pipeline_compress_method == 'ae':
+                    tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
+                elif args.pipeline_compress_method == 'topk':
+                    tensor_shapes.append((2, args.pipeline_k))
+                elif args.pipeline_compress_method == 'randk':
+                    tensor_shapes.append((2, args.pipeline_k))
+                elif args.pipeline_compress_method == 'srht':
+                    tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
+                                          args.pipeline_m))
+                elif args.pipeline_compress_method == 'ct':
+                    tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
+                                          args.pipeline_m))
+                elif args.pipeline_compress_method == 'qr':
+                    tensor_shapes.append((args.micro_batch_size,
+                                          args.hidden_size + seq_length, args.pipeline_qr_r))
+            else:
+                tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     return tensor_shapes
 
 

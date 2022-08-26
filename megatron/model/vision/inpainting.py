@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-i
+
 import math
 import apex
 import einops
@@ -14,7 +14,7 @@ from megatron.model.utils import get_linear_layer
 from megatron.model.vision.vit_backbone import VitBackbone
 from megatron.model.module import MegatronModule
 from megatron.model.vision.mit_backbone import mit_b3
-from megatron.model.vision.utils import resize_
+from megatron.model.vision.utils import resize
 
 
 class VitInpaintingModel(MegatronModule):

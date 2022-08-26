@@ -24,7 +24,7 @@ from megatron.model.vision.inpainting import VitInpaintingModel
 from megatron.model.vision.inpainting import MitInpaintingModel
 from megatron.training import pretrain
 from megatron.utils import average_losses_across_data_parallel_group
-from tasks.vision.metrics import SSIM, PSNR
+from tasks.vision.segmentation.metrics import SSIM, PSNR
 from megatron.model import ModelType
 
 def model_provider(pre_process=True, post_process=True):
@@ -44,11 +44,25 @@ def model_provider(pre_process=True, post_process=True):
 
 def get_batch(data_iterator):
     """Build the batch."""
-    data = next(data_iterator)
 
-    # only data parallelism; no need for broadcast
-    images = data[0][0].cuda()
-    masks = data[0][1].cuda()
+    # Items and their type.
+    keys = ['images', 'masks']
+    datatype = torch.float16
+
+    # Broadcast data.
+    if data_iterator is not None:
+        data = next(data_iterator)
+        data_dict = {}
+        data_dict['images'] = data[0]
+        data_dict['masks'] = data[0].to(torch.float16)
+    else:
+        data = None
+        data_dict = None
+
+    data_b = mpu.broadcast_data(keys, data_dict, datatype)
+    images = data_b['images']
+    masks = data_b['masks'].to(torch.int64)
+
     return images, masks
 
 

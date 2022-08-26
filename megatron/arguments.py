@@ -1020,5 +1020,7 @@ def _add_vision_args(parser):
                        help='teacher temperature')
     group.add_argument('--dino-warmup-teacher-temp-epochs', type=int, default=30,
                        help='warmup teacher temperaure epochs')
+    group.add_argument('--is-vision-train', type=str2bool, default=False,
+                       help='whether do vision train.')
 
     return parser
