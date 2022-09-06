@@ -331,6 +331,7 @@ def main():
     partitions = []
     args.tensor_model_parallel_size = args.target_tensor_model_parallel_size
     args.pipeline_model_parallel_size = args.target_pipeline_model_parallel_size
+    args.virtual_pipeline_model_parallel_size = args.pipeline_model_parallel_size
 
     assert args.num_layers % args.pipeline_model_parallel_size == 0, \
         'num_layers must be divisible by target pipeline model parallel size'
@@ -349,6 +350,7 @@ def main():
 
         for rank in range(args.pipeline_model_parallel_size):
             mpu.initialize.set_pipeline_model_parallel_rank(rank)
+            mpu.initialize.set_virtual_pipeline_model_parallel_rank(0)
             if args.tensor_model_parallel_size >= 1:
                 for _ in range(args.tensor_model_parallel_size):
                     partitions.append([])
