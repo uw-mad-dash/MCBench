@@ -613,13 +613,84 @@ class RowParallelLinear(torch.nn.Module):
                 elif self.tensor_compress_method == 'topk':
                     value, indices, input_abs_size, input_abs_seq_size = \
                         topk.encoder(output_parallel, k=self.k)
-                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
+                    max_value = torch.max(torch.abs(value)) + 1
+                    bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
+                    value = value + bias_tensor
+                    matrix = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                    loc = torch.nonzero(matrix)
+                    matrix_seq = torch.reshape(matrix, (-1,))
+                    value = matrix_seq[matrix_seq != 0]
+                    value = value - bias_tensor
+                    value = value.reshape(-1, 1)
+                    send_info = torch.cat((loc, value), dim=1)
+                    gather_res = gather_from_tensor_model_parallel_region(send_info)
                     world_size = get_tensor_model_parallel_world_size()
                     output_list = []
                     for i in range(0, world_size):
-                        value = gather_list[0][i * self.k: (i + 1) * self.k]
-                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
+                        loc = gather_res[:, i * 4: (i + 1) * 4 - 1]
+                        value = gather_res[:, (i + 1) * 4 - 1]
+                        output_list.append(torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense())
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == 'randk':
+                    value, indices, input_abs_size, input_abs_seq_size = \
+                        randk.encoder(output_parallel, k=self.k)
+                    max_value = torch.max(torch.abs(value)) + 1
+                    bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
+                    value = value + bias_tensor
+                    matrix = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                    loc = torch.nonzero(matrix)
+                    matrix_seq = torch.reshape(matrix, (-1,))
+                    value = matrix_seq[matrix_seq != 0]
+                    value = value - bias_tensor
+                    value = value.reshape(-1, 1)
+                    send_info = torch.cat((loc, value), dim=1)
+                    gather_res = gather_from_tensor_model_parallel_region(send_info)
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        loc = gather_res[:, i * 4: (i + 1) * 4 - 1]
+                        value = gather_res[:, (i + 1) * 4 - 1]
+                        output_list.append(torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense())
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == "topk_old":
+                    value, indices, input_abs_size, input_abs_seq_size = \
+                        topk.encoder(output_parallel, k=self.k)
+                    value = value.to(torch.float32)
+                    indices = indices.to(torch.float32)
+                    send_info = torch.cat((value, indices), dim=0)
+                    gather_res = gather_from_tensor_model_parallel_region(send_info)
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_res[2 * i * self.k: (2 * i + 1) * self.k].to(torch.float16)
+                        indices = gather_res[(2 * i + 1) * self.k: 2 * (i + 1) * self.k].to(torch.int64)
                         output_list.append(topk.decoder(value, indices, input_abs_size, input_abs_seq_size))
+                    output_ = output_list[0]
+                    for i in range(len(output_list)):
+                        if i != 0:
+                            output_ = output_ + output_list[i]
+
+                elif self.tensor_compress_method == "randk_old":
+                    value, indices, input_abs_size, input_abs_seq_size = \
+                        randk.encoder(output_parallel, k=self.k)
+                    value = value.to(torch.float32)
+                    indices = indices.to(torch.float32)
+                    send_info = torch.cat((value, indices), dim=0)
+                    gather_res = gather_from_tensor_model_parallel_region(send_info)
+                    world_size = get_tensor_model_parallel_world_size()
+                    output_list = []
+                    for i in range(0, world_size):
+                        value = gather_res[2 * i * self.k: (2 * i + 1) * self.k].to(torch.float16)
+                        indices = gather_res[(2 * i + 1) * self.k: 2 * (i + 1) * self.k].to(torch.int64)
+                        output_list.append(randk.decoder(value, indices, input_abs_size, input_abs_seq_size))
                     output_ = output_list[0]
                     for i in range(len(output_list)):
                         if i != 0:
@@ -637,21 +708,6 @@ class RowParallelLinear(torch.nn.Module):
                         value = gather_list[0][i * self.k: (i + 1) * self.k]
                         indices = gather_list[1][i * self.k: (i + 1) * self.k]
                         output_list.append(topk.decoder(value, indices, input_abs_size, input_abs_seq_size))
-                    output_ = output_list[0]
-                    for i in range(len(output_list)):
-                        if i != 0:
-                            output_ = output_ + output_list[i]
-
-                elif self.tensor_compress_method == 'randk':
-                    value, indices, input_abs_size, input_abs_seq_size = \
-                        randk.encoder(output_parallel, k=self.k)
-                    gather_list = gather_multi_from_tensor_model_parallel_region([value, indices])
-                    world_size = get_tensor_model_parallel_world_size()
-                    output_list = []
-                    for i in range(0, world_size):
-                        value = gather_list[0][i * self.k: (i + 1) * self.k]
-                        indices = gather_list[1][i * self.k: (i + 1) * self.k]
-                        output_list.append(randk.decoder(value, indices, input_abs_size, input_abs_seq_size))
                     output_ = output_list[0]
                     for i in range(len(output_list)):
                         if i != 0:

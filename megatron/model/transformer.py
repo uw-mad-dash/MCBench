@@ -16,6 +16,7 @@
 """Transformer."""
 import math
 from contextlib import nullcontext
+import sys
 import torch
 import torch.nn.functional as F
 from scipy.linalg import hadamard
@@ -892,12 +893,38 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             if self.pipeline_compress_method == 'ae':
                 output = F.linear(output, self.encoder)
             elif self.pipeline_compress_method == 'topk':
-                value, indices, _, _ = topk.encoder(output, k=self.k)
-                value = value.to(torch.float64)
-                output = torch.stack((value, indices), 0)
+                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
+                max_value = torch.max(torch.abs(value)) + 1
+                bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
+                value = value + bias_tensor  # in case, there exists 0 in randk
+                matrix = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                loc = torch.nonzero(matrix)
+                matrix_seq = torch.reshape(matrix, (-1,))
+                value = matrix_seq[matrix_seq != 0]
+                value = value - bias_tensor
+                value = value.reshape(-1, 1)
+                output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'randk':
-                value, indices, _, _ = randk.encoder(output, k=self.k)
-                value = value.to(torch.float64)
+                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.k)
+                max_value = torch.max(torch.abs(value)) + 1
+                bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
+                value = value + bias_tensor  # in case, there exists 0 in randk
+                matrix = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                loc = torch.nonzero(matrix)
+                matrix_seq = torch.reshape(matrix, (-1,))
+                value = matrix_seq[matrix_seq != 0]
+                value = value - bias_tensor
+                value = value.reshape(-1, 1)
+                output = torch.cat((loc, value), dim=1)
+            elif self.pipeline_compress_method == 'topk_old':
+                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value = value.to(torch.float32)
+                indices = indices.to(torch.float32)
+                output = torch.stack((value, indices), 0)
+            elif self.pipeline_compress_method == 'randk_old':
+                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value = value.to(torch.float32)
+                indices = indices.to(torch.float32)
                 output = torch.stack((value, indices), 0)
             elif self.pipeline_compress_method == 'topk_feedback':
                 batch_size = output.size()[1]
@@ -1044,13 +1071,23 @@ class ParallelTransformerDecoderLayer(MegatronModule):
             if self.pipeline_compress_method == 'ae':
                 hidden_states = F.linear(hidden_states, self.decoder)
             elif self.pipeline_compress_method == 'topk':
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                loc = hidden_states[:, :3]
+                value = hidden_states[:, 3]
+                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
+            elif self.pipeline_compress_method == 'randk':
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                loc = hidden_states[:, :3]
+                value = hidden_states[:, 3]
+                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
+            elif self.pipeline_compress_method == "topk_old":
                 value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
                 input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 input_abs_seq_size = torch.Size([args.seq_length *
                                                  args.micro_batch_size *
                                                  args.hidden_size])
                 hidden_states = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
-            elif self.pipeline_compress_method == 'randk':
+            elif self.pipeline_compress_method == "randk_old":
                 value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
                 input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 input_abs_seq_size = torch.Size([args.seq_length *

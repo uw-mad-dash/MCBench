@@ -550,8 +550,12 @@ def get_tensor_shapes(rank, model_type):
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
                 elif args.pipeline_compress_method == 'topk':
-                    tensor_shapes.append((2, args.pipeline_k))
+                    tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'topk_old':
+                    tensor_shapes.append((2, args.pipeline_k))
+                elif args.pipeline_compress_method == 'randk_old':
                     tensor_shapes.append((2, args.pipeline_k))
                 elif args.pipeline_compress_method == 'srht':
                     tensor_shapes.append((seq_length * args.micro_batch_size + args.hidden_size,
@@ -562,6 +566,8 @@ def get_tensor_shapes(rank, model_type):
                 elif args.pipeline_compress_method == 'qr':
                     tensor_shapes.append((args.micro_batch_size,
                                           args.hidden_size + seq_length, args.pipeline_qr_r))
+                else:
+                    tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
             else:
                 tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     return tensor_shapes
@@ -577,12 +583,18 @@ def recv_forward(tensor_shapes, timers):
             if args.is_pipeline_compress:
                 if args.pipeline_compress_method == 'topk':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                        timers=timers,
-                                                                        dtype_=torch.float64))
+                                                                        timers=timers))
                 elif args.pipeline_compress_method == 'randk':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                        timers=timers))
+                elif args.pipeline_compress_method == 'topk_old':
+                    input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers,
-                                                                        dtype_=torch.float64))
+                                                                        dtype_=torch.float32))
+                elif args.pipeline_compress_method == 'randk_old':
+                    input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                        timers=timers,
+                                                                        dtype_=torch.float32))
                 elif args.pipeline_compress_method == 'quantize':
                     # we need to pay attention here, if we use various quantization
                     # we need to use various dtype_ int8 int4 int2...

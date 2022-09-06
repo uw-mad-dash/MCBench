@@ -13,7 +13,9 @@ RACE
 examples/checkpoints
 try.py
 try_load.py
+try_nn.py
 try_split.py
+try_json.py
 my-corpus.json
 examples/nsys_record
 megatron/fused_kernels/build
