@@ -965,6 +965,36 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 Q = torch.matmul(output.permute(1, 2, 0), P_hat)
                 output = torch.cat((P_hat, Q), 1)
             elif self.pipeline_compress_method == 'quantize':
+                if args.pipeline_bits == 8:
+                    compress_set = quantize.compress_8bit(output)
+                    value = compress_set[0].to(torch.float16)
+                    scaler = compress_set[1].to(torch.float16)
+                    scaler = torch.flatten(scaler)
+                    value_size = value.size()
+                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                    scaler = scaler.reshape(1, value_size[2])
+                    output = torch.cat((value, scaler), dim=0)
+                elif args.pipeline_bits == 4:
+                    compress_set = quantize.compress_4bit(output)
+                    value = compress_set[0].to(torch.float16)
+                    scaler = compress_set[1].to(torch.float16)
+                    scaler = torch.flatten(scaler)
+                    value_size = value.size()
+                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                    scaler = scaler.reshape(2, value_size[2])
+                    output = torch.cat((value, scaler), dim=0)
+                elif args.pipeline_bits == 2:
+                    compress_set = quantize.compress_2bit(output)
+                    value = compress_set[0].to(torch.float16)
+                    scaler = compress_set[1].to(torch.float16)
+                    scaler = torch.flatten(scaler)
+                    value_size = value.size()
+                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                    scaler = scaler.reshape(4, value_size[2])
+                    output = torch.cat((value, scaler), dim=0)
+                else:
+                    raise ValueError("tensor bits is error")
+            elif self.pipeline_compress_method == 'quantize_old':
                 output = output.to(torch.int16)
                 output = output.to(torch.int8)
             else:
@@ -1129,6 +1159,27 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 hidden_states = torch.matmul(P_hat, Q.permute(0, 2, 1))
                 hidden_states = hidden_states.permute(1, 0, 2)
             elif self.pipeline_compress_method == 'quantize':
+                if args.pipeline_bits == 8:
+                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
+                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
+                    value = value.reshape(args.seq_length, args.micro_batch_size, args.hidden_size)
+                    scale = scale.reshape(1, -1).unsqueeze(0)
+                    hidden_states = quantize.decompress_8bit(value, scale)
+                elif args.pipeline_bits == 4:
+                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
+                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
+                    value = value.reshape(args.seq_length, args.micro_batch_size, int(args.hidden_size / 2))
+                    scale = scale.reshape(1, -1).unsqueeze(0)
+                    hidden_states = quantize.decompress_4bit(value, scale)
+                elif args.pipeline_bits == 2:
+                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
+                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
+                    value = value.reshape(args.seq_length, args.micro_batch_size, int(args.hidden_size / 4))
+                    scale = scale.reshape(1, -1).unsqueeze(0)
+                    hidden_states = quantize.decompress_2bit(value, scale)
+                else:
+                    raise ValueError("tensor bits is error")
+            elif self.pipeline_compress_method == 'quantize_old':
                 hidden_states = hidden_states.to(torch.int16)
                 hidden_states = hidden_states.to(torch.float16)
             else:

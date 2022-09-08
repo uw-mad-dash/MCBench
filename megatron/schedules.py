@@ -566,6 +566,13 @@ def get_tensor_shapes(rank, model_type):
                 elif args.pipeline_compress_method == 'qr':
                     tensor_shapes.append((args.micro_batch_size,
                                           args.hidden_size + seq_length, args.pipeline_qr_r))
+                elif args.pipeline_compress_method == 'quantize':
+                    if args.pipeline_bits == 8:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 1, args.hidden_size))
+                    elif args.pipeline_bits == 4:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 2, int(args.hidden_size / 2)))
+                    elif args.pipeline_bits == 2:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 4, int(args.hidden_size / 4)))
                 else:
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
             else:
@@ -596,6 +603,9 @@ def recv_forward(tensor_shapes, timers):
                                                                         timers=timers,
                                                                         dtype_=torch.float32))
                 elif args.pipeline_compress_method == 'quantize':
+                    input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                        timers=timers))
+                elif args.pipeline_compress_method == 'quantize_old':
                     # we need to pay attention here, if we use various quantization
                     # we need to use various dtype_ int8 int4 int2...
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,

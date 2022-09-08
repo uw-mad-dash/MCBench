@@ -599,6 +599,83 @@ class RowParallelLinear(torch.nn.Module):
                     output_ = F.linear(output_, self.decoder)
 
                 elif self.tensor_compress_method == 'quantize':
+                    if args.tensor_bits == 8:
+                        compress_set = quantize.compress_8bit(output_parallel)
+                        value = compress_set[0].to(torch.float16)
+                        scale = compress_set[1].to(torch.float16)
+                        scale = torch.flatten(scale)
+                        value_size = value.size()
+                        value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                        scale = scale.reshape(1, value_size[2])
+                        send_info = torch.cat((value, scale), dim=0)
+                        gather_res = gather_from_tensor_model_parallel_region(send_info)
+                        world_size = get_tensor_model_parallel_world_size()
+                        output_list = []
+                        for i in range(0, world_size):
+                            value = gather_res[:value_size[0] * value_size[1], i * value_size[2]: (i + 1) * value_size[2]]
+                            scale = gather_res[value_size[0] * value_size[1]:, i * value_size[2]: (i + 1) * value_size[2]]
+                            value = value.reshape(value_size[0], value_size[1], value_size[2])
+                            scale = scale.reshape(1, 1, value_size[2])
+                            output_list.append(quantize.decompress_8bit(value, scale))
+                        output_ = output_list[0]
+                        for i in range(len(output_list)):
+                            if i != 0:
+                                output_ = output_ + output_list[i]
+                        output_ = output_parallel
+                    elif args.tensor_bits == 4:
+                        compress_set = quantize.compress_4bit(output_parallel)
+                        value = compress_set[0].to(torch.float16)
+                        scale = compress_set[1].to(torch.float16)
+                        scale = torch.flatten(scale)
+                        value_size = value.size()
+                        value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                        scale = scale.reshape(2, value_size[2])
+                        send_info = torch.cat((value, scale), dim=0)
+                        gather_res = gather_from_tensor_model_parallel_region(send_info)
+                        world_size = get_tensor_model_parallel_world_size()
+                        output_list = []
+                        for i in range(0, world_size):
+                            value = gather_res[:value_size[0] * value_size[1],
+                                    i * value_size[2]: (i + 1) * value_size[2]]
+                            scale = gather_res[value_size[0] * value_size[1]:,
+                                     i * value_size[2]: (i + 1) * value_size[2]]
+                            value = value.reshape(value_size[0], value_size[1], value_size[2])
+                            scale = scale.reshape(1, 1, 2 * value_size[2])
+                            output_list.append(quantize.decompress_4bit(value, scale))
+                        output_ = output_list[0]
+                        for i in range(len(output_list)):
+                            if i != 0:
+                                output_ = output_ + output_list[i]
+                        output_ = output_parallel
+                    elif args.tensor_bits == 2:
+                        compress_set = quantize.compress_2bit(output_parallel)
+                        value = compress_set[0].to(torch.float16)
+                        scale = compress_set[1].to(torch.float16)
+                        scale = torch.flatten(scale)
+                        value_size = value.size()
+                        value = value.reshape(value_size[0] * value_size[1], value_size[2])
+                        scale = scale.reshape(4, value_size[2])
+                        send_info = torch.cat((value, scale), dim=0)
+                        gather_res = gather_from_tensor_model_parallel_region(send_info)
+                        world_size = get_tensor_model_parallel_world_size()
+                        output_list = []
+                        for i in range(0, world_size):
+                            value = gather_res[:value_size[0] * value_size[1],
+                                    i * value_size[2]: (i + 1) * value_size[2]]
+                            scale = gather_res[value_size[0] * value_size[1]:,
+                                     i * value_size[2]: (i + 1) * value_size[2]]
+                            value = value.reshape(value_size[0], value_size[1], value_size[2])
+                            scale = scale.reshape(1, 1, 4 * value_size[2])
+                            output_list.append(quantize.decompress_2bit(value, scale))
+                        output_ = output_list[0]
+                        for i in range(len(output_list)):
+                            if i != 0:
+                                output_ = output_ + output_list[i]
+                        output_ = output_parallel
+                    else:
+                        raise ValueError("tensor bits is error")
+
+                elif self.tensor_compress_method == 'quantize_old':
                     output_parallel = output_parallel.to(torch.int16)
                     output_parallel = output_parallel.to(torch.int8)
                     # output_parallel, scale = quantize.compress_2bit(output_parallel)

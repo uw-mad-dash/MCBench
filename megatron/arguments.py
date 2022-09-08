@@ -359,6 +359,8 @@ def _add_compression_args(parser):
                        help='choose value k for top-k and rand-k compression')
     group.add_argument('--pipeline-qr-r', type=int, default=10,
                        help='choose value r for QR decomposition')
+    group.add_argument('--pipeline-bits', type=int, default=2,
+                       help='choose bits for quantize compression')
     group.add_argument('--is-tensor-compress', type=str2bool, default=False,
                        help='whether do tensor compression')
     group.add_argument('--tensor-compress-method', type=str, default='ae',
@@ -371,6 +373,8 @@ def _add_compression_args(parser):
                        help='choose value k for top-k and rand-k compression')
     group.add_argument('--tensor-qr-r', type=int, default=10,
                        help='choose value r for QR decomposition')
+    group.add_argument('--tensor-bits', type=int, default=2,
+                       help='choose bits for quantize compression')
     group.add_argument('--warmup_epoch', type=int, default=0,
                        help='do compression after warmup epoch')
     group.add_argument('--current_epoch', type=int, default=0,
