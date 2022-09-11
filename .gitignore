@@ -11,11 +11,7 @@ megatron_bert_345m_v0.1_uncased.zip
 examples/results
 RACE
 examples/checkpoints
-try.py
-try_load.py
-try_nn.py
-try_split.py
-try_json.py
+try*.py
 my-corpus.json
 examples/nsys_record
 megatron/fused_kernels/build

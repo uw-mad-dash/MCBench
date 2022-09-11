@@ -154,6 +154,10 @@ def _initialize_distributed():
     args = get_args()
 
     device_count = torch.cuda.device_count()
+    if args.multinode_train:
+        if 'SLURM_PROCID' in os.environ:
+            args.rank = int(os.environ['SLURM_PROCID'])
+
     if torch.distributed.is_initialized():
 
         if args.rank == 0:

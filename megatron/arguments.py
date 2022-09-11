@@ -383,6 +383,8 @@ def _add_compression_args(parser):
                        help='do compression after warmup iteration')
     group.add_argument('--current_iteration', type=int, default=0,
                        help='current iteration')
+    group.add_argument('--multinode_train', type=str2bool, default=False,
+                       help='whether use multinode to train the model')
 
     return parser
 
