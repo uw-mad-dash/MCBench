@@ -375,6 +375,8 @@ def _add_compression_args(parser):
                        help='choose value r for QR decomposition')
     group.add_argument('--tensor-bits', type=int, default=2,
                        help='choose bits for quantize compression')
+    group.add_argument('--multinode-train', type=str2bool, default=False,
+                       help='whether use multinode to train the model')
     group.add_argument('--warmup_epoch', type=int, default=0,
                        help='do compression after warmup epoch')
     group.add_argument('--current_epoch', type=int, default=0,
@@ -383,8 +385,6 @@ def _add_compression_args(parser):
                        help='do compression after warmup iteration')
     group.add_argument('--current_iteration', type=int, default=0,
                        help='current iteration')
-    group.add_argument('--multinode_train', type=str2bool, default=False,
-                       help='whether use multinode to train the model')
 
     return parser
 
