@@ -8,10 +8,10 @@ def encoder(tensor, k):
     input_abs_seq = torch.reshape(input_abs, (-1,))
     input_abs_seq_size = input_abs_seq.size()
     if k < input_abs_seq.size()[0]:
-        value, indices = torch.topk(input_abs_seq, k)
+        _, indices = torch.topk(input_abs_seq, k)
         value = tensor[indices]
     else:
-        value, indices = torch.topk(input_abs_seq, input_abs_seq.size()[0])
+        _, indices = torch.topk(input_abs_seq, input_abs_seq.size()[0])
         value = tensor[indices]
     return value, indices, input_abs_size, input_abs_seq_size
 

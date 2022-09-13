@@ -782,6 +782,14 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                     torch.empty(args.pipeline_ae_dim, args.hidden_size,
                                 device=torch.cuda.current_device(), dtype=args.params_dtype)
                 ))
+            elif self.pipeline_compress_method == 'topk':
+                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                               device=torch.cuda.current_device(),
+                                               dtype=torch.int64)
+            elif self.pipeline_compress_method == 'randk':
+                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                               device=torch.cuda.current_device(),
+                                               dtype=torch.int64)
             elif self.pipeline_compress_method == 'srht':
                 self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
             elif self.pipeline_compress_method == 'topk_feedback':
@@ -894,26 +902,20 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 output = F.linear(output, self.encoder)
             elif self.pipeline_compress_method == 'topk':
                 value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
-                max_value = torch.max(torch.abs(value)) + 1
-                bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
-                value = value + bias_tensor  # in case, there exists 0 in randk
-                matrix = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
-                loc = torch.nonzero(matrix)
-                matrix_seq = torch.reshape(matrix, (-1,))
-                value = matrix_seq[matrix_seq != 0]
-                value = value - bias_tensor
+                self.bool_matrix.zero_()
+                self.bool_matrix = self.bool_matrix.reshape(-1, )
+                self.bool_matrix[indices] = 1
+                self.bool_matrix = self.bool_matrix.reshape(input_abs_size)
+                loc = torch.nonzero(self.bool_matrix)
                 value = value.reshape(-1, 1)
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'randk':
                 value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.k)
-                max_value = torch.max(torch.abs(value)) + 1
-                bias_tensor = torch.full(value.size(), max_value.data, dtype=value.dtype).cuda()
-                value = value + bias_tensor  # in case, there exists 0 in randk
-                matrix = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
-                loc = torch.nonzero(matrix)
-                matrix_seq = torch.reshape(matrix, (-1,))
-                value = matrix_seq[matrix_seq != 0]
-                value = value - bias_tensor
+                self.bool_matrix.zero_()
+                self.bool_matrix = self.bool_matrix.reshape(-1, )
+                self.bool_matrix[indices] = 1
+                self.bool_matrix = self.bool_matrix.reshape(input_abs_size)
+                loc = torch.nonzero(self.bool_matrix)
                 value = value.reshape(-1, 1)
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'topk_old':
