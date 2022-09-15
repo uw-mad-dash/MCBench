@@ -793,7 +793,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             elif self.pipeline_compress_method == 'srht':
                 self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
             elif self.pipeline_compress_method == 'topk_feedback':
-                self.bool_matrix_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
                                                device=torch.cuda.current_device(),
                                                dtype=torch.int64)
@@ -801,7 +800,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                                                   device=torch.cuda.current_device(),
                                                   dtype=args.params_dtype)
             elif self.pipeline_compress_method == 'randk_feedback':
-                self.bool_matrix_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
                                                device=torch.cuda.current_device(),
                                                dtype=torch.int64)
@@ -938,30 +936,34 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 output = torch.stack((value, indices), 0)
             elif self.pipeline_compress_method == 'topk_feedback':
                 batch_size = output.size()[1]
-                output = output + self.error_feedback[:, :batch_size, :]
+                output.data = output.data + self.error_feedback[:, :batch_size, :].data
                 value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
                 topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
                 topk_dense = topk_sparse.to_dense()
-                self.error_feedback[:, :batch_size, :] = output.detach() - topk_dense.detach()
+                topk_res = torch.reshape(topk_dense, input_abs_size)
+                self.error_feedback[:, :batch_size, :].data = output.data - topk_res.data
                 self.bool_matrix.zero_()
-                self.bool_matrix = self.bool_matrix.reshape(-1, )
-                self.bool_matrix[indices] = 1
-                self.bool_matrix = self.bool_matrix.reshape(self.bool_matrix_size)
-                loc = torch.nonzero(self.bool_matrix)
+                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
+                bool_matrix = bool_matrix.reshape(-1, )
+                bool_matrix[indices] = 1
+                bool_matrix = bool_matrix.reshape(input_abs_size)
+                loc = torch.nonzero(bool_matrix)
                 value = value.reshape(-1, 1)
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'randk_feedback':
                 batch_size = output.size()[1]
-                output = output + self.error_feedback[:, :batch_size, :]
+                output.data = output.data + self.error_feedback[:, :batch_size, :].data
                 value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.k)
                 topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
                 topk_dense = topk_sparse.to_dense()
-                self.error_feedback[:, :batch_size, :] = output.detach() - topk_dense.detach()
+                topk_res = torch.reshape(topk_dense, input_abs_size)
+                self.error_feedback[:, :batch_size, :].data = output.data - topk_res.data
                 self.bool_matrix.zero_()
-                self.bool_matrix = self.bool_matrix.reshape(-1, )
-                self.bool_matrix[indices] = 1
-                self.bool_matrix = self.bool_matrix.reshape(self.bool_matrix_size)
-                loc = torch.nonzero(self.bool_matrix)
+                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
+                bool_matrix = bool_matrix.reshape(-1, )
+                bool_matrix[indices] = 1
+                bool_matrix = bool_matrix.reshape(input_abs_size)
+                loc = torch.nonzero(bool_matrix)
                 value = value.reshape(-1, 1)
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'srht':

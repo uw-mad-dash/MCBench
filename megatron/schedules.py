@@ -553,6 +553,10 @@ def get_tensor_shapes(rank, model_type):
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
                     tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'topk_feedback':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'randk_feedback':
+                    tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'topk_old':
                     tensor_shapes.append((2, args.pipeline_k))
                 elif args.pipeline_compress_method == 'randk_old':
@@ -592,6 +596,12 @@ def recv_forward(tensor_shapes, timers):
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
                 elif args.pipeline_compress_method == 'randk':
+                    input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                        timers=timers))
+                elif args.pipeline_compress_method == 'topk_feedback':
+                    input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                        timers=timers))
+                elif args.pipeline_compress_method == 'randk_feedback':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
                 elif args.pipeline_compress_method == 'topk_old':
