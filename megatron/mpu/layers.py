@@ -486,6 +486,7 @@ class RowParallelLinear(torch.nn.Module):
         self.r = args.tensor_qr_r
         self.warmup_epoch = args.warmup_epoch
         self.warmup_iteration = args.warmup_iteration
+        self.start_tensor_compress_layer = args.start_tensor_compress_layer
         if args.use_cpu_initialization:
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
@@ -603,7 +604,7 @@ class RowParallelLinear(torch.nn.Module):
             else:
                 output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         else:
-            if self.is_tensor_compress and self.layer_number > 12:
+            if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer:
                 if self.tensor_compress_method == 'ae':
                     output_parallel = F.linear(output_parallel, self.encoder)
                     if self.sequence_parallel:

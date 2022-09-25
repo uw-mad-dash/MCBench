@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+
 #SBATCH --job-name=ft_wnli    # create a short name for your job
-#SBATCH --output=results/4_1_wnli_randk_1000.txt
+#SBATCH --output=results/4_1_wnli_ae_1.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -50,14 +52,15 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method srht \
-               --pipeline-ae-dim 1024 \
-               --pipeline-qr-r 10 \
+               --pipeline-compress-method qr \
+               --pipeline-ae-dim 100 \
+               --pipeline-qr-r 30 \
                --pipeline-k 10000 \
                --pipeline-m 50 \
                --is-tensor-compress True \
-               --tensor-compress-method topk \
-               --tensor-ae-dim 100 \
-               --tensor-qr-r 10 \
-               --tensor-k 10000 \
+               --tensor-compress-method ae \
+               --tensor-ae-dim 1 \
+               --tensor-qr-r 30 \
+               --tensor-k 1 \
                --tensor-m 50 \
+               --tensor-bits 8 \

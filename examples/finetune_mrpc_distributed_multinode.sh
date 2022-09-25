@@ -1,12 +1,14 @@
 #!/bin/bash
 
+# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+
 WORLD_SIZE=4
 
 DISTRIBUTED_ARGS="--nproc_per_node 1 \
                   --nnodes $WORLD_SIZE \
                   --node_rank $1 \
-                  --master_addr 172.31.71.187 \
-                  --master_port 6100"
+                  --master_addr 44.205.3.63 \
+                  --master_port 6001"
 
 TRAIN_DATA="../glue_data/MRPC/msr_paraphrase_train.txt"
 VALID_DATA="../glue_data/MRPC/msr_paraphrase_test.txt"
@@ -15,7 +17,7 @@ PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4t
 CHECKPOINT_PATH=checkpoints/bert_345m_mrpc
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size $WORLD_SIZE \
+               --tensor-model-parallel-size 4 \
                --pipeline-model-parallel-size 1 \
                --task MRPC \
                --seed 1234 \
@@ -41,15 +43,15 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method randk \
-               --pipeline-ae-dim 1024 \
+               --pipeline-compress-method ae \
+               --pipeline-ae-dim 50 \
                --pipeline-qr-r 10 \
                --pipeline-k 10000 \
                --pipeline-m 50 \
                --is-tensor-compress True \
-               --tensor-compress-method randk \
-               --tensor-ae-dim 10 \
+               --tensor-compress-method ae \
+               --tensor-ae-dim 50 \
                --tensor-qr-r 10 \
-               --tensor-k 1000 \
+               --tensor-k 10000 \
                --tensor-m 50 \
 #               --no-masked-softmax-fusion # My environment (orca) can't handle this, feel free to comment it in AWS

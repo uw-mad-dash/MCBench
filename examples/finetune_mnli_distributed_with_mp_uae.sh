@@ -1,7 +1,9 @@
 #!/bin/bash
 
+# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+
 #SBATCH --job-name=ft_mnli    # create a short name for your job
-#SBATCH --output=results/4_1_mnli_randk_1000.txt
+#SBATCH --output=results/2_2_mnli_8_128.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -21,7 +23,8 @@ TRAIN_DATA="../glue_data/MNLI/train.tsv"
 VALID_DATA="../glue_data/MNLI/dev_matched.tsv \
             ../glue_data/MNLI/dev_mismatched.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_16
+PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
+#PRETRAINED_CHECKPOINT=checkpoints/bert_book_pretrain_1000000_4_256
 CHECKPOINT_PATH=checkpoints/bert_345m_mnli
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
@@ -33,15 +36,15 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --valid-data $VALID_DATA \
                --tokenizer-type BertWordPieceLowerCase \
                --vocab-file $VOCAB_FILE \
-               --epochs 5 \
+               --epochs 3 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 16 \
+               --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 512 \
+               --seq-length 128 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --save $CHECKPOINT_PATH \
@@ -51,15 +54,17 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method srht \
-               --pipeline-ae-dim 1024 \
-               --pipeline-qr-r 10 \
+               --pipeline-compress-method randk \
+               --pipeline-ae-dim 100 \
+               --pipeline-qr-r 30 \
                --pipeline-k 10000 \
                --pipeline-m 50 \
-               --is-tensor-compress True \
+               --pipeline-bits 4 \
+               --is-tensor-compress False \
                --tensor-compress-method topk \
                --tensor-ae-dim 100 \
-               --tensor-qr-r 10 \
+               --tensor-qr-r 30 \
                --tensor-k 10000 \
                --tensor-m 50 \
+               --tensor-bits 4 \
 

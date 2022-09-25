@@ -24,12 +24,12 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --valid-data $VALID_DATA \
                --tokenizer-type BertWordPieceLowerCase \
                --vocab-file $VOCAB_FILE \
-               --epochs 1 \
+               --epochs 3 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 8 \
+               --micro-batch-size 32 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
@@ -41,8 +41,17 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress True \
-               --pipeline-compress-dim 5 \
-               --is-tensor-compress False \
-               --tensor-compress-dim 1024
+               --is-pipeline-compress False \
+               --pipeline-compress-method randk \
+               --pipeline-ae-dim 1024 \
+               --pipeline-qr-r 10 \
+               --pipeline-k 10000 \
+               --pipeline-m 50 \
+               --is-tensor-compress True \
+               --tensor-compress-method ae \
+               --tensor-ae-dim 100 \
+               --tensor-qr-r 10 \
+               --tensor-k 10 \
+               --tensor-m 50 \
+               --tensor-bits 8 \
 

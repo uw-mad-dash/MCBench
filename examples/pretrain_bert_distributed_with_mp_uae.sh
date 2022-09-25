@@ -1,4 +1,13 @@
-#! /bin/bash
+#!/bin/bash
+
+#SBATCH --job-name=1_256_bert_book_pretrain    # create a short name for your job
+#SBATCH --output=results/bert_book_pretrain_1000000_256.txt
+#SBATCH --nodes=1                # node count
+#SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
+#SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --mem=64G                 # total memory per node (4 GB per cpu-core is default)
+#SBATCH --gres=gpu:4            # number of gpus per node
+#SBATCH --time=960:00:00          # total run time limit (HH:MM:SS)
 
 GPUS_PER_NODE=4
 # Change for multinode config
@@ -8,16 +17,16 @@ NNODES=1
 NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
-DATA_PATH=../my-book-200_text_sentence
+DATA_PATH=../my-bert-wiki-and-book_text_sentence
 VOCAB_FILE=../bert-large-cased-vocab.txt
-CHECKPOINT_PATH=checkpoints/bert_pretrain_local
+CHECKPOINT_PATH=checkpoints/bert_book_pretrain_1000000_256
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_bert.py \
-       --tensor-model-parallel-size 2 \
-       --pipeline-model-parallel-size 2 \
+       --tensor-model-parallel-size 1 \
+       --pipeline-model-parallel-size 1 \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
@@ -40,7 +49,7 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction 0.01 \
-       --log-interval 100 \
+       --log-interval 10000 \
        --save-interval 50000 \
        --eval-interval 10000 \
        --eval-iters 100 \
@@ -51,13 +60,9 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --pipeline-qr-r 10 \
        --pipeline-k 10000 \
        --pipeline-m 50 \
-       --pipeline-bits 8 \
-       --start-pipeline-compress-rank 1 \
        --is-tensor-compress False \
        --tensor-compress-method topk \
        --tensor-ae-dim 50 \
        --tensor-qr-r 10 \
        --tensor-k 10000 \
        --tensor-m 50 \
-       --tensor-bits 8 \
-       --start-tensor-compress-layer 12 \

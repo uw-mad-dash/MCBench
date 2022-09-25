@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=ft_race    # create a short name for your job
-#SBATCH --output=results/4_1_race_randk_1000.txt
+#SBATCH --output=results/4_1_race_topk_10000.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -56,7 +56,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --attention-dropout 0.1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method srht \
+               --pipeline-compress-method randk \
                --pipeline-ae-dim 1024 \
                --pipeline-qr-r 10 \
                --pipeline-k 10000 \

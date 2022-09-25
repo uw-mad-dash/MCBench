@@ -385,7 +385,10 @@ def _add_compression_args(parser):
                        help='do compression after warmup iteration')
     group.add_argument('--current_iteration', type=int, default=0,
                        help='current iteration')
-
+    group.add_argument('--start-pipeline-compress-rank', type=int, default=0,
+                       help='when to start to do pipeline compression')
+    group.add_argument('--start-tensor-compress-layer', type=int, default=12,
+                       help='when to start to do tensor compression')
     return parser
 
 

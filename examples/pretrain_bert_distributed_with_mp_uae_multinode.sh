@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=4_4_deepak_bert_pretrain    # create a short name for your job
-#SBATCH --output=results/4_4_deepak_bert_pretrain.txt
+#SBATCH --job-name=4_4_dacheng_bert_pretrain    # create a short name for your job
+#SBATCH --output=results/4_4_dacheng_bert_pretrain.txt
 #SBATCH --nodes=4                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=32        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -9,7 +9,7 @@
 #SBATCH --gres=gpu:4            # number of gpus per node
 #SBATCH --time=960:00:00          # total run time limit (HH:MM:SS)
 
-export MASTER_PORT=12010
+export MASTER_PORT=12311
 export WORLD_SIZE=16
 echo "MASTER_PORT="$MASTER_PORT
 echo "WORLD_SIZE="$WORLD_SIZE
@@ -26,7 +26,7 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 DATA_PATH=../my-bert-wiki-and-book_text_sentence
 VOCAB_FILE=../bert-large-cased-vocab.txt
-CHECKPOINT_PATH=checkpoints/4_4_deepak_bert_pretrain
+CHECKPOINT_PATH=checkpoints/4_4_dacheng_bert_pretrain
 
 options="\
        --tensor-model-parallel-size 4 \
@@ -34,9 +34,9 @@ options="\
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
-       --micro-batch-size 4 \
+       --micro-batch-size 256 \
        --global-batch-size 1024 \
-       --seq-length 512 \
+       --seq-length 128 \
        --max-position-embeddings 512 \
        --train-iters 500000 \
        --save $CHECKPOINT_PATH \
@@ -53,9 +53,9 @@ options="\
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction 0.01 \
-       --log-interval 1000 \
+       --log-interval 5000 \
        --save-interval 5000 \
-       --eval-interval 1000 \
+       --eval-interval 5000 \
        --eval-iters 100 \
        --fp16 \
        --is-pipeline-compress False \
@@ -77,4 +77,4 @@ options="\
 run_cmd="python -u ../pretrain_bert.py $@ ${options}"
 
 srun -l \
-     --output=results/4_4_deepak_bert_pretrain.txt sh -c "${run_cmd}"
+     --output=results/4_4_dacheng_bert_pretrain.txt sh -c "${run_cmd}"

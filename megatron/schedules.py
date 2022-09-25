@@ -546,7 +546,9 @@ def get_tensor_shapes(rank, model_type):
         if args.is_vision_train:
             tensor_shapes.append((args.micro_batch_size, args.hidden_size))
         else:
-            if args.is_pipeline_compress:
+            # we can change the threshold for pipeline model parallel rank
+            # to custom the number of compression
+            if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank:
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
                 elif args.pipeline_compress_method == 'topk':
