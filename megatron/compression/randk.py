@@ -5,16 +5,17 @@ import random
 def encoder(tensor, k):
     input_abs = torch.abs(tensor)
     input_abs_size = input_abs.size()
+    tensor = torch.reshape(tensor, (-1,))
     input_abs_seq = torch.reshape(input_abs, (-1,))
     input_abs_seq_size = input_abs_seq.size()
     if k < input_abs_seq.size()[0]:
-        indices = random.sample(range(0, input_abs_seq_size[0] - 1), k)
+        indices = random.sample(range(0, input_abs_seq_size[0]), k)
         indices = torch.tensor(indices).cuda()
-        value = input_abs_seq[indices]
+        value = tensor[indices]
     else:
-        indices = list(range(0, input_abs_seq_size[0] - 1))
+        indices = list(range(0, input_abs_seq_size[0]))
         indices = torch.tensor(indices).cuda()
-        value = input_abs_seq[indices]
+        value = tensor[indices]
     return value, indices, input_abs_size, input_abs_seq_size
 
 

@@ -491,7 +491,7 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(self.output_size,
                                                 self.input_size_per_partition,
                                                 dtype=args.params_dtype))
-            if self.is_tensor_compress:
+            if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer:
                 if self.tensor_compress_method == 'ae':
                     # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
                     self.encoder = Parameter(torch.nn.init.xavier_uniform_(
@@ -528,7 +528,7 @@ class RowParallelLinear(torch.nn.Module):
             self.weight = Parameter(torch.empty(
                 self.output_size, self.input_size_per_partition,
                 device=torch.cuda.current_device(), dtype=args.params_dtype))
-            if self.is_tensor_compress:
+            if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer:
                 if self.tensor_compress_method == 'ae':
                     # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
                     self.encoder = Parameter(torch.nn.init.xavier_uniform_(
@@ -716,15 +716,13 @@ class RowParallelLinear(torch.nn.Module):
                     send_info = torch.cat((loc, value), dim=1)
                     gather_res = gather_from_tensor_model_parallel_region(send_info)
                     world_size = get_tensor_model_parallel_world_size()
-                    output_list = []
                     for i in range(0, world_size):
                         loc = gather_res[:, i * 4: (i + 1) * 4 - 1]
                         value = gather_res[:, (i + 1) * 4 - 1]
-                        output_list.append(torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense())
-                    output_ = output_list[0]
-                    for i in range(len(output_list)):
-                        if i != 0:
-                            output_ = output_ + output_list[i]
+                        if i == 0:
+                            output_ = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
+                        else:
+                            output_ = output_ + torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
 
                 elif self.tensor_compress_method == 'randk':
                     batch_size = output_parallel.size()[1]
@@ -740,15 +738,13 @@ class RowParallelLinear(torch.nn.Module):
                     send_info = torch.cat((loc, value), dim=1)
                     gather_res = gather_from_tensor_model_parallel_region(send_info)
                     world_size = get_tensor_model_parallel_world_size()
-                    output_list = []
                     for i in range(0, world_size):
                         loc = gather_res[:, i * 4: (i + 1) * 4 - 1]
                         value = gather_res[:, (i + 1) * 4 - 1]
-                        output_list.append(torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense())
-                    output_ = output_list[0]
-                    for i in range(len(output_list)):
-                        if i != 0:
-                            output_ = output_ + output_list[i]
+                        if i == 0:
+                            output_ = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
+                        else:
+                            output_ = output_ + torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
 
                 elif self.tensor_compress_method == "topk_old":
                     value, indices, input_abs_size, input_abs_seq_size = \
