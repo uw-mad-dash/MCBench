@@ -775,42 +775,71 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         self.bias_dropout_add_exec_handler = \
                 nullcontext if use_nvfuser else torch.enable_grad
 
-        if self.is_pipeline_compress:
-            if self.pipeline_compress_method == 'ae':
-                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-                self.encoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.pipeline_ae_dim, args.hidden_size,
-                                device=torch.cuda.current_device(), dtype=args.params_dtype)
-                ))
-            elif self.pipeline_compress_method == 'topk':
-                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                               device=torch.cuda.current_device(),
-                                               dtype=torch.int64)
-            elif self.pipeline_compress_method == 'randk':
-                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                               device=torch.cuda.current_device(),
-                                               dtype=torch.int64)
-            elif self.pipeline_compress_method == 'srht':
-                self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
-            elif self.pipeline_compress_method == 'topk_feedback':
-                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                               device=torch.cuda.current_device(),
-                                               dtype=torch.int64)
-                self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                  device=torch.cuda.current_device(),
-                                                  dtype=args.params_dtype)
-            elif self.pipeline_compress_method == 'randk_feedback':
-                self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                               device=torch.cuda.current_device(),
-                                               dtype=torch.int64)
-                self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                  device=torch.cuda.current_device(),
-                                                  dtype=args.params_dtype)
+        if args.use_cpu_initialization:
+            if self.is_pipeline_compress:
+                if self.pipeline_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.pipeline_ae_dim, args.hidden_size,
+                                    dtype=args.params_dtype)
+                    ))
+                elif self.pipeline_compress_method == 'topk':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   dtype=torch.int64)
+                elif self.pipeline_compress_method == 'randk':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   dtype=torch.int64)
+                elif self.pipeline_compress_method == 'srht':
+                    self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16)
+                elif self.pipeline_compress_method == 'topk_feedback':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   dtype=torch.int64)
+                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                      dtype=args.params_dtype)
+                elif self.pipeline_compress_method == 'randk_feedback':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   dtype=torch.int64)
+                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                      dtype=args.params_dtype)
+        else:
+            if self.is_pipeline_compress:
+                if self.pipeline_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.encoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.pipeline_ae_dim, args.hidden_size,
+                                    device=torch.cuda.current_device(), dtype=args.params_dtype)
+                    ))
+                elif self.pipeline_compress_method == 'topk':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   device=torch.cuda.current_device(),
+                                                   dtype=torch.int64)
+                elif self.pipeline_compress_method == 'randk':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   device=torch.cuda.current_device(),
+                                                   dtype=torch.int64)
+                elif self.pipeline_compress_method == 'srht':
+                    self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
+                elif self.pipeline_compress_method == 'topk_feedback':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   device=torch.cuda.current_device(),
+                                                   dtype=torch.int64)
+                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                      device=torch.cuda.current_device(),
+                                                      dtype=args.params_dtype)
+                elif self.pipeline_compress_method == 'randk_feedback':
+                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                   device=torch.cuda.current_device(),
+                                                   dtype=torch.int64)
+                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
+                                                      device=torch.cuda.current_device(),
+                                                      dtype=args.params_dtype)
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
                 inference_params=None):
         # hidden_states: [s, b, h]
+        start_encoder = torch.cuda.Event(enable_timing=True)
+        end_encoder = torch.cuda.Event(enable_timing=True)
 
         # Layer norm at the beginning of the transformer layer.
         layernorm_output = self.input_layernorm(hidden_states)
@@ -901,7 +930,25 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         if self.is_pipeline_compress:
             args = get_args()
             if self.pipeline_compress_method == 'ae':
+                start_encoder.record()
                 output = F.linear(output, self.encoder)
+                end_encoder.record()
+                torch.cuda.synchronize()
+                print("pipeline encoder (ms): ", start_encoder.elapsed_time(end_encoder))
+            elif self.pipeline_compress_method == "topk_int":
+                start_encoder.record()
+                value, indices, _, _ = topk.encoder(output, k=self.k)
+                output = [value, indices]
+                end_encoder.record()
+                torch.cuda.synchronize()
+                print("pipeline encoder (ms): ", start_encoder.elapsed_time(end_encoder))
+            elif self.pipeline_compress_method == "randk_int":
+                start_encoder.record()
+                value, indices, _, _ = randk.encoder(output, k=self.k)
+                output = [value, indices]
+                end_encoder.record()
+                torch.cuda.synchronize()
+                print("pipeline encoder (ms): ", start_encoder.elapsed_time(end_encoder))
             elif self.pipeline_compress_method == 'topk':
                 batch_size = output.size()[1]
                 value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
@@ -990,7 +1037,21 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 P_hat = P_hat.to(torch.float16)
                 Q = torch.matmul(output.permute(1, 2, 0), P_hat)
                 output = torch.cat((P_hat, Q), 1)
-            elif self.pipeline_compress_method == 'quantize':
+            elif self.pipeline_compress_method == "quantize":
+                start_encoder.record()
+                if args.pipeline_bits == 8:
+                    output.data, scale = quantize.compress_8bit(output.data)
+                elif args.pipeline_bits == 4:
+                    output.data, scale = quantize.compress_4bit(output.data)
+                elif args.pipeline_bits == 2:
+                    output.data, scale = quantize.compress_2bit(output.data)
+                else:
+                    raise ValueError("pipeline bits is not correct")
+                output = [output, scale]
+                end_encoder.record()
+                torch.cuda.synchronize()
+                print("pipeline encoder (ms): ", start_encoder.elapsed_time(end_encoder))
+            elif self.pipeline_compress_method == 'quantize_float':
                 if args.pipeline_bits == 8:
                     compress_set = quantize.compress_8bit(output)
                     value = compress_set[0].to(torch.float16)
@@ -1109,23 +1170,56 @@ class ParallelTransformerDecoderLayer(MegatronModule):
         self.bias_dropout_add_exec_handler = \
                 nullcontext if use_nvfuser else torch.enable_grad
 
-        if self.is_pipeline_compress:
-            if self.pipeline_compress_method == 'ae':
-                # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
-                self.decoder = Parameter(torch.nn.init.xavier_uniform_(
-                    torch.empty(args.hidden_size, args.pipeline_ae_dim,
-                                dtype=args.params_dtype))
-                )
+        if args.use_cpu_initialization:
+            if self.is_pipeline_compress:
+                if self.pipeline_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.hidden_size, args.pipeline_ae_dim,
+                                    dtype=args.params_dtype))
+                    )
+        else:
+            if self.is_pipeline_compress:
+                if self.pipeline_compress_method == 'ae':
+                    # torch.nn.init.xavier_uniform_ is used to avoid exploding gradient problem
+                    self.decoder = Parameter(torch.nn.init.xavier_uniform_(
+                        torch.empty(args.hidden_size, args.pipeline_ae_dim,
+                                    device=torch.cuda.current_device(),
+                                    dtype=args.params_dtype))
+                    )
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
                 inference_params=None):
         # hidden_states: [s, b, h]
-
+        start_decoder = torch.cuda.Event(enable_timing=True)
+        end_decoder = torch.cuda.Event(enable_timing=True)
         if self.is_pipeline_compress:
             args = get_args()
             if self.pipeline_compress_method == 'ae':
+                start_decoder.record()
                 hidden_states = F.linear(hidden_states, self.decoder)
+                end_decoder.record()
+                torch.cuda.synchronize()
+                print("pipeline decoder (ms): ", start_decoder.elapsed_time(end_decoder))
+            elif self.pipeline_compress_method == "topk_int":
+                start_decoder.record()
+                value, indices = hidden_states[0], hidden_states[1]
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                input_abs_seq_size = torch.Size([args.seq_length * args.micro_batch_size * args.hidden_size])
+                hidden_states = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                end_decoder.record()
+                torch.cuda.synchronize()
+                print("pipeline decoder (ms): ", start_decoder.elapsed_time(end_decoder))
+            elif self.pipeline_compress_method == "randk_int":
+                start_decoder.record()
+                value, indices = hidden_states[0], hidden_states[1]
+                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
+                input_abs_seq_size = torch.Size([args.seq_length * args.micro_batch_size * args.hidden_size])
+                hidden_states = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+                end_decoder.record()
+                torch.cuda.synchronize()
+                print("pipeline decoder (ms): ", start_decoder.elapsed_time(end_decoder))
             elif self.pipeline_compress_method == 'topk':
                 input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 loc = hidden_states[:, :3]
@@ -1180,7 +1274,21 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 Q = split[1]
                 hidden_states = torch.matmul(P_hat, Q.permute(0, 2, 1))
                 hidden_states = hidden_states.permute(1, 0, 2)
-            elif self.pipeline_compress_method == 'quantize':
+            elif self.pipeline_compress_method == "quantize":
+                start_decoder.record()
+                if args.pipeline_bits == 8:
+                    hidden_states[0].data = quantize.decompress_8bit(hidden_states[0].data, hidden_states[1]).data
+                elif args.pipeline_bits == 4:
+                    hidden_states[0].data = quantize.decompress_4bit(hidden_states[0].data, hidden_states[1]).data
+                elif args.pipeline_bits == 2:
+                    hidden_states[0].data = quantize.decompress_2bit(hidden_states[0].data, hidden_states[1]).data
+                else:
+                    raise ValueError("pipeline bits is not correct")
+                hidden_states = hidden_states[0]
+                end_decoder.record()
+                torch.cuda.synchronize()
+                print("pipeline decoder (ms): ", start_decoder.elapsed_time(end_decoder))
+            elif self.pipeline_compress_method == 'quantize_float':
                 if args.pipeline_bits == 8:
                     value = hidden_states[:args.seq_length * args.micro_batch_size, :]
                     scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
@@ -1559,11 +1667,22 @@ class ParallelTransformer(MegatronModule):
         #   likely redundant, since p2p_communication.py (likely originator)
         #   already creates viewless tensors. That said, make_viewless_tensor()
         #   is called here to be future-proof and corner-case-proof.
-        hidden_states = mpu.make_viewless_tensor(
-            hidden_states,
-            requires_grad=True,
-            keep_graph=True,
-        )
+        if isinstance(hidden_states, list):
+            hidden_states[0], hidden_states[1] = mpu.make_viewless_tensor(
+                hidden_states[0],
+                requires_grad=True,
+                keep_graph=True,
+            ), mpu.make_viewless_tensor(
+                hidden_states[1],
+                requires_grad=False,
+                keep_graph=True,
+            )
+        else:
+            hidden_states = mpu.make_viewless_tensor(
+                hidden_states,
+                requires_grad=True,
+                keep_graph=True,
+            )
 
         if self.sequence_parallel:
             rng_context = mpu.get_cuda_rng_tracker().fork()

@@ -159,6 +159,28 @@ def _train(model, optimizer, opt_param_scheduler, forward_step,
     """Train the model."""
     args = get_args()
     timers = get_timers()
+    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
+               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
+               + "_" + str(args.micro_batch_size) \
+               + "_" + str(args.seq_length) \
+               + "_" + str(args.is_tensor_compress) \
+               + "_" + str(args.is_pipeline_compress) \
+               + "_" + str(args.tensor_compress_method) \
+               + "_" + str(args.tensor_ae_dim) \
+               + "_" + str(args.tensor_k) \
+               + "_" + str(args.tensor_bits) \
+               + "_" + str(args.pipeline_compress_method) \
+               + "_" + str(args.pipeline_ae_dim) \
+               + "_" + str(args.pipeline_k) \
+               + "_" + str(args.pipeline_bits) + ".txt"
+    with open(filename, 'w') as file:
+        import time
+        now = int(round(time.time() * 1000))
+        file.write(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now / 1000)) + '\n')
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
 
     assert get_num_microbatches() == 1, "finetuning with gradient accumulation doesn't currently work"
 
@@ -200,7 +222,13 @@ def _train(model, optimizer, opt_param_scheduler, forward_step,
             args.current_iteration = iteration
 
             # Train for one step.
+            start.record()
             out = train_step(forward_step, batch, model, optimizer, opt_param_scheduler)
+            end.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("Iteration (ms): " + str(start.elapsed_time(end)) + '\n')
+            print("Iteration (ms):", start.elapsed_time(end))
 
             losses_dict, skipped_iter, grad_norm, num_zeros_in_grad = out
             iteration += 1

@@ -64,18 +64,26 @@ def _communicate(tensor_send_next, tensor_send_prev, recv_prev, recv_next,
         if tensor_shape is None:
             tensor_shape = (args.seq_length, args.micro_batch_size, args.hidden_size)
 
-    override_scatter_gather_tensors_in_pipeline = False
-    if args.scatter_gather_tensors_in_pipeline and \
-            not args.sequence_parallel:
-        tensor_chunk_shape = reduce(operator.mul, tensor_shape, 1)
-        if tensor_chunk_shape % mpu.get_tensor_model_parallel_world_size() == 0:
-            tensor_chunk_shape = tensor_chunk_shape // \
-                mpu.get_tensor_model_parallel_world_size()
+    # print("tensor send next:", tensor_send_next)
+    if dtype_ == torch.uint8 or \
+            (tensor_send_next is not None and tensor_send_next.dtype == torch.uint8):
+        tensor_chunk_shape = tensor_shape
+    else:
+        override_scatter_gather_tensors_in_pipeline = False
+        if args.scatter_gather_tensors_in_pipeline and \
+                not args.sequence_parallel:
+            if isinstance(tensor_shape, int):
+                tensor_chunk_shape = tensor_shape
+            else:
+                tensor_chunk_shape = reduce(operator.mul, tensor_shape, 1)
+            if tensor_chunk_shape % mpu.get_tensor_model_parallel_world_size() == 0:
+                tensor_chunk_shape = tensor_chunk_shape // \
+                    mpu.get_tensor_model_parallel_world_size()
+            else:
+                tensor_chunk_shape = tensor_shape
+                override_scatter_gather_tensors_in_pipeline = True
         else:
             tensor_chunk_shape = tensor_shape
-            override_scatter_gather_tensors_in_pipeline = True
-    else:
-        tensor_chunk_shape = tensor_shape
     dtype = args.params_dtype
     if args.fp32_residual_connection:
         dtype = torch.float
@@ -86,25 +94,49 @@ def _communicate(tensor_send_next, tensor_send_prev, recv_prev, recv_next,
         requires_grad = False
 
     if recv_prev:
-        tensor_recv_prev = torch.empty(tensor_chunk_shape,
-                                       requires_grad=requires_grad,
-                                       device=torch.cuda.current_device(),
-                                       dtype=dtype)
+        if dtype_ == torch.uint8:
+            tensor_recv_prev = torch.empty(tensor_chunk_shape,
+                                           requires_grad=requires_grad,
+                                           device=torch.cuda.current_device(),
+                                           dtype=dtype)
+            tensor_recv_prev_send = torch.empty(tensor_chunk_shape,
+                                                requires_grad=True,
+                                                device=torch.cuda.current_device(),
+                                                dtype=torch.float16)
+        else:
+            tensor_recv_prev = torch.empty(tensor_chunk_shape,
+                                           requires_grad=requires_grad,
+                                           device=torch.cuda.current_device(),
+                                           dtype=dtype)
     if recv_next:
-        tensor_recv_next = torch.empty(tensor_chunk_shape,
-                                       requires_grad=requires_grad,
-                                       device=torch.cuda.current_device(),
-                                       dtype=dtype)
+        if dtype_ == torch.uint8:
+            tensor_recv_next = torch.empty(tensor_chunk_shape,
+                                           requires_grad=requires_grad,
+                                           device=torch.cuda.current_device(),
+                                           dtype=dtype)
+            tensor_recv_next_send = torch.empty(tensor_chunk_shape,
+                                                requires_grad=True,
+                                                device=torch.cuda.current_device(),
+                                                dtype=torch.float16)
+        else:
+            tensor_recv_next = torch.empty(tensor_chunk_shape,
+                                           requires_grad=requires_grad,
+                                           device=torch.cuda.current_device(),
+                                           dtype=dtype)
 
     # Split tensor into smaller chunks if using scatter-gather optimization.
-    if not override_scatter_gather_tensors_in_pipeline and \
-            args.scatter_gather_tensors_in_pipeline and \
-            not args.sequence_parallel:
-        if tensor_send_next is not None:
-            tensor_send_next = mpu.split_tensor_into_1d_equal_chunks(tensor_send_next)
+    if dtype_ == torch.uint8 or \
+            (tensor_send_next is not None and tensor_send_next.dtype == torch.uint8):
+        pass
+    else:
+        if not override_scatter_gather_tensors_in_pipeline and \
+                args.scatter_gather_tensors_in_pipeline and \
+                not args.sequence_parallel:
+            if tensor_send_next is not None:
+                tensor_send_next = mpu.split_tensor_into_1d_equal_chunks(tensor_send_next)
 
-        if tensor_send_prev is not None:
-            tensor_send_prev = mpu.split_tensor_into_1d_equal_chunks(tensor_send_prev)
+            if tensor_send_prev is not None:
+                tensor_send_prev = mpu.split_tensor_into_1d_equal_chunks(tensor_send_prev)
 
     # Send tensors in both the forward and backward directions as appropriate.
     if use_ring_exchange:
@@ -143,22 +175,47 @@ def _communicate(tensor_send_next, tensor_send_prev, recv_prev, recv_next,
     torch.cuda.synchronize()
 
     # If using scatter-gather optimization, gather smaller chunks.
-    if not override_scatter_gather_tensors_in_pipeline and \
-            args.scatter_gather_tensors_in_pipeline and \
-            not args.sequence_parallel:
-        if recv_prev:
-            tensor_recv_prev = mpu.gather_split_1d_tensor(
-                tensor_recv_prev).view(tensor_shape).requires_grad_()
-            tensor_recv_prev = mpu.make_viewless_tensor(tensor_recv_prev,
-                                                        requires_grad = True,
-                                                        keep_graph = False)
+    if dtype_ == torch.uint8 or \
+            (tensor_send_next is not None and tensor_send_next.dtype == torch.uint8):
+        pass
+    else:
+        if not override_scatter_gather_tensors_in_pipeline and \
+                args.scatter_gather_tensors_in_pipeline and \
+                not args.sequence_parallel:
+            if recv_prev:
+                if dtype_ is not None:
+                    tensor_recv_prev = mpu.gather_split_1d_tensor(
+                        tensor_recv_prev).view(tensor_shape)
+                    tensor_recv_prev = mpu.make_viewless_tensor(tensor_recv_prev,
+                                                                requires_grad = False,
+                                                                keep_graph = False)
+                else:
+                    tensor_recv_prev = mpu.gather_split_1d_tensor(
+                        tensor_recv_prev).view(tensor_shape).requires_grad_()
+                    tensor_recv_prev = mpu.make_viewless_tensor(tensor_recv_prev,
+                                                                requires_grad = True,
+                                                                keep_graph = False)
 
-        if recv_next:
-            tensor_recv_next = mpu.gather_split_1d_tensor(
-                tensor_recv_next).view(tensor_shape).requires_grad_()
-            tensor_recv_next = mpu.make_viewless_tensor(tensor_recv_next,
-                                                        requires_grad = True,
-                                                        keep_graph = False)
+            if recv_next:
+                if dtype_ is not None:
+                    tensor_recv_next = mpu.gather_split_1d_tensor(
+                        tensor_recv_next).view(tensor_shape)
+                    tensor_recv_next = mpu.make_viewless_tensor(tensor_recv_next,
+                                                                requires_grad = False,
+                                                                keep_graph = False)
+                else:
+                    tensor_recv_next = mpu.gather_split_1d_tensor(
+                        tensor_recv_next).view(tensor_shape).requires_grad_()
+                    tensor_recv_next = mpu.make_viewless_tensor(tensor_recv_next,
+                                                                requires_grad = True,
+                                                                keep_graph = False)
+    if dtype_ == torch.uint8:
+        if tensor_recv_prev is not None:
+            tensor_recv_prev_send.data = tensor_recv_prev.data
+            tensor_recv_prev = tensor_recv_prev_send
+        if tensor_recv_next is not None:
+            tensor_recv_next_send.data = tensor_recv_next.data
+            tensor_recv_next = tensor_recv_next_send
 
     return tensor_recv_prev, tensor_recv_next
 
@@ -251,7 +308,7 @@ def send_forward_recv_backward(output_tensor, tensor_shape=None, timers=None):
     return output_tensor_grad
 
 
-def send_backward_recv_forward(input_tensor_grad, tensor_shape=None, timers=None):
+def send_backward_recv_forward(input_tensor_grad, tensor_shape=None, timers=None, dtype_=None):
     """Batched send and recv with previous rank in pipeline."""
     if mpu.is_pipeline_first_stage():
         input_tensor = None
@@ -263,7 +320,8 @@ def send_backward_recv_forward(input_tensor_grad, tensor_shape=None, timers=None
             tensor_send_prev=input_tensor_grad,
             recv_prev=True,
             recv_next=False,
-            tensor_shape=tensor_shape)
+            tensor_shape=tensor_shape,
+            dtype_=dtype_)
         if timers is not None:
             timers('backward-send-forward-recv').stop()
     return input_tensor

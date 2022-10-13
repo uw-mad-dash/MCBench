@@ -406,17 +406,43 @@ def train_step(forward_step_func, data_iterator,
     """Single training step."""
     args = get_args()
     timers = get_timers()
-
+    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
+               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
+               + "_" + str(args.micro_batch_size) \
+               + "_" + str(args.seq_length) \
+               + "_" + str(args.is_tensor_compress) \
+               + "_" + str(args.is_pipeline_compress) \
+               + "_" + str(args.tensor_compress_method) \
+               + "_" + str(args.tensor_ae_dim) \
+               + "_" + str(args.tensor_k) \
+               + "_" + str(args.tensor_bits) \
+               + "_" + str(args.pipeline_compress_method) \
+               + "_" + str(args.pipeline_ae_dim) \
+               + "_" + str(args.pipeline_k) \
+               + "_" + str(args.pipeline_bits) + ".txt"
+    start_forward_backward = torch.cuda.Event(enable_timing=True)
+    end_forward_backward = torch.cuda.Event(enable_timing=True)
+    start_optimizer = torch.cuda.Event(enable_timing=True)
+    end_optimizer = torch.cuda.Event(enable_timing=True)
     # Set grad to zero.
     if args.DDP_impl == 'local' and args.use_contiguous_buffers_in_local_ddp:
         for partition in model:
             partition.zero_grad_buffer()
     optimizer.zero_grad()
 
+    start_forward_backward.record()
     forward_backward_func = get_forward_backward_func()
     losses_reduced = forward_backward_func(
         forward_step_func, data_iterator, model,
         optimizer, timers, forward_only=False)
+    end_forward_backward.record()
+    torch.cuda.synchronize()
+    with open(filename, 'a') as file:
+        file.write("forward_backward_func (ms): "
+                   + str(start_forward_backward.elapsed_time(end_forward_backward)) + '\n')
+    print("forward_backward_func (ms):", start_forward_backward.elapsed_time(end_forward_backward))
 
     # Empty unused memory
     if args.empty_unused_memory_level >= 1:
@@ -495,7 +521,13 @@ def train_step(forward_step_func, data_iterator,
 
     # Update parameters.
     timers('optimizer').start()
+    start_optimizer.record()
     update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    end_optimizer.record()
+    torch.cuda.synchronize()
+    with open(filename, 'a') as file:
+        file.write("optimizer (ms): " + str(start_optimizer.elapsed_time(end_optimizer)) + '\n')
+    print("optimizer (ms):", start_optimizer.elapsed_time(end_optimizer))
     timers('optimizer').stop()
 
     if args.vision_pretraining and args.vision_pretraining_type == "dino":
@@ -717,6 +749,27 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
     """Train the model function."""
     args = get_args()
     timers = get_timers()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
+               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
+               + "_" + str(args.micro_batch_size) \
+               + "_" + str(args.seq_length) \
+               + "_" + str(args.is_tensor_compress) \
+               + "_" + str(args.is_pipeline_compress) \
+               + "_" + str(args.tensor_compress_method) \
+               + "_" + str(args.tensor_ae_dim) \
+               + "_" + str(args.tensor_k) \
+               + "_" + str(args.tensor_bits) \
+               + "_" + str(args.pipeline_compress_method) \
+               + "_" + str(args.pipeline_ae_dim) \
+               + "_" + str(args.pipeline_k) \
+               + "_" + str(args.pipeline_bits) + ".txt"
+    with open(filename, 'w') as file:
+        now = int(round(time.time() * 1000))
+        file.write(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now/1000)) + '\n')
 
     # Write args to tensorboard
     write_args_to_tensorboard()
@@ -737,12 +790,18 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
     while iteration < args.train_iters:
         update_num_microbatches(args.consumed_train_samples)
         args.curr_iteration = iteration
+        start.record()
         loss_dict, skipped_iter, grad_norm, num_zeros_in_grad = \
             train_step(forward_step_func,
                        train_data_iterator,
                        model,
                        optimizer,
                        opt_param_scheduler)
+        end.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("Iteration (ms): " + str(start.elapsed_time(end)) + '\n')
+        print("Iteration (ms):", start.elapsed_time(end))
         iteration += 1
         args.consumed_train_samples += mpu.get_data_parallel_world_size() * \
                                        args.micro_batch_size * \

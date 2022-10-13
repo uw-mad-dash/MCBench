@@ -401,9 +401,12 @@ class TransformerLanguageModel(MegatronModule):
                 'input_tensor should only be length 1 for stage with both encoder and decoder'
             self.encoder.set_input_tensor(input_tensor[0])
         elif self.add_encoder:
-            assert len(input_tensor) == 1, \
-                'input_tensor should only be length 1 for stage with only encoder'
-            self.encoder.set_input_tensor(input_tensor[0])
+            # assert len(input_tensor) == 1, \
+            #     'input_tensor should only be length 1 for stage with only encoder'
+            if len(input_tensor) == 1:
+                self.encoder.set_input_tensor(input_tensor[0])
+            else:
+                self.encoder.set_input_tensor(input_tensor)
         elif self.add_decoder:
             if len(input_tensor) == 2:
                 self.decoder.set_input_tensor(input_tensor[0])

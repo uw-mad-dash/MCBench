@@ -232,6 +232,27 @@ def forward_backward_no_pipelining(forward_step_func,
     Returns dictionary with losses."""
     assert len(model) == 1
     model = model[0]
+    args = get_args()
+    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
+               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
+               + "_" + str(args.micro_batch_size) \
+               + "_" + str(args.seq_length) \
+               + "_" + str(args.is_tensor_compress) \
+               + "_" + str(args.is_pipeline_compress) \
+               + "_" + str(args.tensor_compress_method) \
+               + "_" + str(args.tensor_ae_dim) \
+               + "_" + str(args.tensor_k) \
+               + "_" + str(args.tensor_bits) \
+               + "_" + str(args.pipeline_compress_method) \
+               + "_" + str(args.pipeline_ae_dim) \
+               + "_" + str(args.pipeline_k) \
+               + "_" + str(args.pipeline_bits) + ".txt"
+    start_forward = torch.cuda.Event(enable_timing=True)
+    end_forward = torch.cuda.Event(enable_timing=True)
+    start_backward = torch.cuda.Event(enable_timing=True)
+    end_backward = torch.cuda.Event(enable_timing=True)
 
     context_handler = dummy_handler
     if isinstance(model, torchDDP):
@@ -241,20 +262,40 @@ def forward_backward_no_pipelining(forward_step_func,
     input_tensor, output_tensor_grad = None, None
     with context_handler():
         for i in range(get_num_microbatches() - 1):
+            start_forward.record()
             output_tensor = forward_step(forward_step_func, data_iterator,
                                          model, input_tensor, forward_data_store,
                                          collect_non_loss_data)
+            end_forward.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("forward step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
             if not forward_only:
+                start_backward.record()
                 backward_step(optimizer, input_tensor, output_tensor,
                               output_tensor_grad)
+                end_backward.record()
+                torch.cuda.synchronize()
+                with open(filename, 'a') as file:
+                    file.write("backward step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
 
     # Run computation for last microbatch out of context handler (want to
     # synchronize gradients).
+    start_forward.record()
     output_tensor = forward_step(forward_step_func, data_iterator,
                                  model, input_tensor, forward_data_store,
                                  collect_non_loss_data)
+    end_forward.record()
+    torch.cuda.synchronize()
+    with open(filename, 'a') as file:
+        file.write("forward step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
     if not forward_only:
+        start_backward.record()
         backward_step(optimizer, input_tensor, output_tensor, output_tensor_grad)
+        end_backward.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("backward step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
 
     return forward_data_store
 
@@ -507,7 +548,7 @@ def forward_backward_pipelining_with_interleaving(forward_step_func,
     return forward_data_store
 
 
-def get_tensor_shapes(rank, model_type):
+def get_tensor_shapes(rank, model_type, is_forward=True):
     # Determine right tensor sizes (based on position of rank with respect to split
     # rank) and model size.
     # Send two tensors if model is T5 and rank is in decoder stage:
@@ -551,6 +592,18 @@ def get_tensor_shapes(rank, model_type):
             if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank:
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
+                elif args.pipeline_compress_method == "topk_int":
+                    if is_forward:
+                        tensor_shapes.append((args.pipeline_k))
+                        tensor_shapes.append((args.pipeline_k))
+                    else:
+                        tensor_shapes.append((args.pipeline_k))
+                elif args.pipeline_compress_method == "randk_int":
+                    if is_forward:
+                        tensor_shapes.append((args.pipeline_k))
+                        tensor_shapes.append((args.pipeline_k))
+                    else:
+                        tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
@@ -573,6 +626,17 @@ def get_tensor_shapes(rank, model_type):
                     tensor_shapes.append((args.micro_batch_size,
                                           args.hidden_size + seq_length, args.pipeline_qr_r))
                 elif args.pipeline_compress_method == 'quantize':
+                    if is_forward:
+                        if args.pipeline_bits == 8:
+                            tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+                        elif args.pipeline_bits == 4:
+                            tensor_shapes.append((seq_length, args.micro_batch_size, int(args.hidden_size / 2)))
+                        elif args.pipeline_bits == 2:
+                            tensor_shapes.append((seq_length, args.micro_batch_size, int(args.hidden_size / 4)))
+                        tensor_shapes.append((1, 1, args.hidden_size))
+                    else:
+                        tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+                elif args.pipeline_compress_method == 'quantize_float':
                     if args.pipeline_bits == 8:
                         tensor_shapes.append((args.micro_batch_size * seq_length + 1, args.hidden_size))
                     elif args.pipeline_bits == 4:
@@ -588,6 +652,7 @@ def get_tensor_shapes(rank, model_type):
 
 def recv_forward(tensor_shapes, timers):
     input_tensors = []
+    flag = True
     for tensor_shape in tensor_shapes:
         if tensor_shape is None:
             input_tensors.append(None)
@@ -600,6 +665,24 @@ def recv_forward(tensor_shapes, timers):
                 elif args.pipeline_compress_method == 'randk':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
+                elif args.pipeline_compress_method == 'topk_int':
+                    if flag:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers))
+                        flag = False
+                    else:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers,
+                                                                            dtype_=torch.int64))
+                elif args.pipeline_compress_method == 'randk_int':
+                    if flag:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers))
+                        flag = False
+                    else:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers,
+                                                                            dtype_=torch.int64))
                 elif args.pipeline_compress_method == 'topk_feedback':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
@@ -615,6 +698,22 @@ def recv_forward(tensor_shapes, timers):
                                                                         timers=timers,
                                                                         dtype_=torch.float32))
                 elif args.pipeline_compress_method == 'quantize':
+                    if len(tensor_shapes) != 1:
+                        # since dtype_ is uint8 here
+                        # if length of tensor_shapes is 1
+                        # the dtype of tensor is float16 or float32.
+                        if flag:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers,
+                                                                                dtype_=torch.uint8))
+                            flag = False
+                        else:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers))
+                    else:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers))
+                elif args.pipeline_compress_method == 'quantize_float':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
                 elif args.pipeline_compress_method == 'quantize_old':
@@ -646,6 +745,9 @@ def recv_backward(tensor_shapes, timers):
 def send_forward(output_tensors, tensor_shapes, timers):
     if not isinstance(output_tensors, list):
         output_tensors = [output_tensors]
+    if isinstance(output_tensors[0], list):
+        if len(output_tensors[0]) > 1:
+            output_tensors = output_tensors[0]
     for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
         if tensor_shape is None:
             continue
@@ -665,13 +767,63 @@ def send_forward_recv_backward(output_tensors, tensor_shapes, timers):
     if not isinstance(output_tensors, list):
         output_tensors = [output_tensors]
     output_tensor_grads = []
-    for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
-        if tensor_shape is None:
-            output_tensor_grads.append(None)
-            continue
-        output_tensor_grad = p2p_communication.send_forward_recv_backward(
-                output_tensor, tensor_shape, timers=timers)
-        output_tensor_grads.append(output_tensor_grad)
+    if isinstance(output_tensors[0], list):
+        if len(output_tensors[0]) > 1:
+            output_tensors = output_tensors[0]
+    # for some cases, we need to recv one time and send two times
+    args = get_args()
+    if args.pipeline_compress_method == "topk_int" or args.pipeline_compress_method == "randk_int":
+        if len(output_tensors) > 1:
+            for (output_tensor, tensor_shape) in zip([output_tensors[0]], [tensor_shapes[0]]):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+    elif args.pipeline_compress_method == 'quantize':
+        if len(output_tensors) > 1:
+            if args.pipeline_bits == 8:
+                recv_shape = tensor_shapes[0]
+            elif args.pipeline_bits == 4:
+                recv_shape = (tensor_shapes[0][0], tensor_shapes[0][1], int(tensor_shapes[0][2] * 2))
+            elif args.pipeline_bits == 2:
+                recv_shape = (tensor_shapes[0][0], tensor_shapes[0][1], int(tensor_shapes[0][2] * 4))
+            else:
+                raise ValueError("pipeline bits is not correct")
+            for (output_tensor, tensor_shape) in zip([output_tensors[0]], [recv_shape]):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                        output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+    else:
+        for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+            if tensor_shape is None:
+                output_tensor_grads.append(None)
+                continue
+            output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+            output_tensor_grads.append(output_tensor_grad)
     return output_tensor_grads
 
 
@@ -679,13 +831,55 @@ def send_backward_recv_forward(input_tensor_grads, tensor_shapes, timers):
     if not isinstance(input_tensor_grads, list):
         input_tensor_grads = [input_tensor_grads]
     input_tensors = []
-    for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
-        if tensor_shape is None:
-            input_tensors.append(None)
-            continue
-        input_tensor = p2p_communication.send_backward_recv_forward(
-                input_tensor_grad, tensor_shape, timers=timers)
-        input_tensors.append(input_tensor)
+    # for some cases, we need to send one time and recv two times
+    args = get_args()
+    if args.pipeline_compress_method == "topk_int" or args.pipeline_compress_method == "randk_int":
+        if len(tensor_shapes) > 1:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, [tensor_shapes[0]]):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                        input_tensor_grad, tensor_shape, timers=timers)
+                input_tensors.append(input_tensor)
+            input_tensors.append(p2p_communication.recv_forward(tensor_shapes[1],
+                                                                timers=timers,
+                                                                dtype_=torch.int64))
+        else:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                    input_tensor_grad, tensor_shape, timers=timers)
+                input_tensors.append(input_tensor)
+    elif args.pipeline_compress_method == 'quantize':
+        if len(tensor_shapes) > 1:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, [tensor_shapes[0]]):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                        input_tensor_grad, tensor_shape, timers=timers, dtype_=torch.uint8)
+                input_tensors.append(input_tensor)
+            input_tensors.append(p2p_communication.recv_forward(tensor_shapes[1],
+                                                                timers=timers))
+        else:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                    input_tensor_grad, tensor_shape, timers=timers)
+                input_tensors.append(input_tensor)
+    else:
+        for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
+            if tensor_shape is None:
+                input_tensors.append(None)
+                continue
+            input_tensor = p2p_communication.send_backward_recv_forward(
+                    input_tensor_grad, tensor_shape, timers=timers)
+            input_tensors.append(input_tensor)
     return input_tensors
 
 
@@ -705,6 +899,30 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
 
     assert len(model) == 1
     model = model[0]
+    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
+               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
+               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
+               + "_" + str(args.micro_batch_size) \
+               + "_" + str(args.seq_length) \
+               + "_" + str(args.is_tensor_compress) \
+               + "_" + str(args.is_pipeline_compress) \
+               + "_" + str(args.tensor_compress_method) \
+               + "_" + str(args.tensor_ae_dim) \
+               + "_" + str(args.tensor_k) \
+               + "_" + str(args.tensor_bits) \
+               + "_" + str(args.pipeline_compress_method) \
+               + "_" + str(args.pipeline_ae_dim) \
+               + "_" + str(args.pipeline_k) \
+               + "_" + str(args.pipeline_bits) + ".txt"
+    start_comm = torch.cuda.Event(enable_timing=True)
+    end_comm = torch.cuda.Event(enable_timing=True)
+    start_forward = torch.cuda.Event(enable_timing=True)
+    end_forward = torch.cuda.Event(enable_timing=True)
+    start_backward = torch.cuda.Event(enable_timing=True)
+    end_backward = torch.cuda.Event(enable_timing=True)
+    start_deallocate = torch.cuda.Event(enable_timing=True)
+    end_deallocate = torch.cuda.Event(enable_timing=True)
 
     # Compute number of warmup microbatches.
     num_microbatches = get_num_microbatches()
@@ -721,8 +939,13 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
         model, (torchDDP, LocalDDP, Float16Module))
     model_type = unwrapped_model.model_type
     rank = mpu.get_pipeline_model_parallel_rank()
-    recv_tensor_shapes = get_tensor_shapes(rank-1, model_type)
-    send_tensor_shapes = get_tensor_shapes(rank, model_type)
+    # recv_tensor_shapes = get_tensor_shapes(rank-1, model_type)
+    # send_tensor_shapes = get_tensor_shapes(rank, model_type)
+    # if the program is stop or blocked, please pay attention to the tensor shape here.
+    recv_tensor_shapes_forward = get_tensor_shapes(rank-1, model_type, is_forward=True)
+    send_tensor_shapes_forward = get_tensor_shapes(rank, model_type, is_forward=True)
+    recv_tensor_shapes_backward = get_tensor_shapes(rank, model_type, is_forward=False)
+    send_tensor_shapes_backward = get_tensor_shapes(rank-1, model_type, is_forward=False)
 
     # Input, output tensors only need to be saved when doing backward passes
     input_tensors = None
@@ -734,76 +957,168 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
 
     # Run warmup forward passes.
     for i in range(num_warmup_microbatches):
-        input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
+        start_comm.record()
+        input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
+        end_comm.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
+        start_forward.record()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      collect_non_loss_data)
-        send_forward(output_tensor, send_tensor_shapes, timers=timers)
+        end_forward.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("forward_step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
+        start_comm.record()
+        send_forward(output_tensor, send_tensor_shapes_forward, timers=timers)
+        end_comm.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("send_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
+        start_deallocate.record()
         if not forward_only:
             input_tensors.append(input_tensor)
-            output_tensors.append(output_tensor)
-            deallocate_output_tensor(output_tensor[0])
+            if isinstance(output_tensor[0], list):
+                output_tensors.append([output_tensor[0][0]])
+                deallocate_output_tensor(output_tensor[0][0])
+            else:
+                output_tensors.append(output_tensor)
+                deallocate_output_tensor(output_tensor[0])
+        end_deallocate.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("deallocate tensor (ms): " + str(start_deallocate.elapsed_time(end_deallocate)) + '\n')
 
     # Before running 1F1B, need to receive first forward tensor.
     # If all microbatches are run in warmup / cooldown phase, then no need to
     # receive this tensor here.
     if num_microbatches_remaining > 0:
-        input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
+        start_comm.record()
+        input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
+        end_comm.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
     # Run 1F1B in steady state.
     for i in range(num_microbatches_remaining):
         last_iteration = (i == (num_microbatches_remaining - 1))
 
+        start_forward.record()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      collect_non_loss_data)
+        end_forward.record()
+        torch.cuda.synchronize()
+        with open(filename, 'a') as file:
+            file.write("forward_step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
         if forward_only:
-            send_forward(output_tensor, send_tensor_shapes, timers=timers)
+            send_forward(output_tensor, send_tensor_shapes_forward, timers=timers)
 
             if not last_iteration:
-                input_tensor = recv_forward(recv_tensor_shapes, timers=timers)
+                input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
 
         else:
+            start_comm.record()
             output_tensor_grad = \
                 send_forward_recv_backward(output_tensor,
-                                           send_tensor_shapes,
+                                           send_tensor_shapes_forward,
                                            timers=timers)
-
+            end_comm.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("send_forward_recv_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
             # Add input_tensor and output_tensor to end of list.
+            start_deallocate.record()
             input_tensors.append(input_tensor)
-            output_tensors.append(output_tensor)
-            deallocate_output_tensor(output_tensor[0])
+            if isinstance(output_tensor[0], list):
+                output_tensors.append([output_tensor[0][0]])
+                deallocate_output_tensor(output_tensor[0][0])
+            else:
+                output_tensors.append(output_tensor)
+                deallocate_output_tensor(output_tensor[0])
+            end_deallocate.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("deallocate tensor (ms): " + str(start_deallocate.elapsed_time(end_deallocate)) + '\n')
 
             # Pop input_tensor and output_tensor from the start of the list for
             # the backward pass.
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
-            input_tensor_grad = \
-                backward_step(optimizer, input_tensor, output_tensor,
-                              output_tensor_grad)
+            start_backward.record()
+            if len(input_tensor) > 1:
+                input_tensor_grad = \
+                    backward_step(optimizer, input_tensor[0], output_tensor,
+                                  output_tensor_grad)
+            else:
+                input_tensor_grad = \
+                    backward_step(optimizer, input_tensor, output_tensor,
+                                  output_tensor_grad)
+            end_backward.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("backward_step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
+            # input_tensor_grad = \
+            #     backward_step(optimizer, input_tensor, output_tensor,
+            #                   output_tensor_grad)
 
             if last_iteration:
                 input_tensor = None
-                send_backward(input_tensor_grad, recv_tensor_shapes, timers=timers)
+                start_comm.record()
+                send_backward(input_tensor_grad, send_tensor_shapes_backward, timers=timers)
+                end_comm.record()
+                torch.cuda.synchronize()
+                with open(filename, 'a') as file:
+                    file.write("send_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
             else:
+                start_comm.record()
                 input_tensor = \
                     send_backward_recv_forward(
-                        input_tensor_grad, recv_tensor_shapes, timers=timers)
-
+                        input_tensor_grad, recv_tensor_shapes_forward, timers=timers)
+                end_comm.record()
+                torch.cuda.synchronize()
+                with open(filename, 'a') as file:
+                    file.write("send_backward_recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
     # Run cooldown backward passes.
     if not forward_only:
         for i in range(num_warmup_microbatches):
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
-            output_tensor_grad = recv_backward(send_tensor_shapes, timers=timers)
+            start_comm.record()
+            output_tensor_grad = recv_backward(recv_tensor_shapes_backward, timers=timers)
+            end_comm.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("recv_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
-            input_tensor_grad = \
-                backward_step(optimizer, input_tensor, output_tensor,
-                              output_tensor_grad)
+            start_backward.record()
+            if len(input_tensor) > 1:
+                input_tensor_grad = \
+                    backward_step(optimizer, input_tensor[0], output_tensor,
+                                  output_tensor_grad)
+            else:
+                input_tensor_grad = \
+                    backward_step(optimizer, input_tensor, output_tensor,
+                                  output_tensor_grad)
+            end_backward.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("backward_step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
+            # input_tensor_grad = \
+            #     backward_step(optimizer, input_tensor, output_tensor,
+            #                   output_tensor_grad)
 
-            send_backward(input_tensor_grad, recv_tensor_shapes, timers=timers)
+            start_comm.record()
+            send_backward(input_tensor_grad, send_tensor_shapes_backward, timers=timers)
+            end_comm.record()
+            torch.cuda.synchronize()
+            with open(filename, 'a') as file:
+                file.write("send_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
     return forward_data_store
