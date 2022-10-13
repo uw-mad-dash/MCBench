@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=4_4_dacheng_bert_pretrain    # create a short name for your job
-#SBATCH --output=results/4_4_dacheng_bert_pretrain.txt
+#SBATCH --output=results/4_4_dacheng_bert_pretrain_topk_1000000.txt
 #SBATCH --nodes=4                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=32        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -26,7 +26,7 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 DATA_PATH=../my-bert-wiki-and-book_text_sentence
 VOCAB_FILE=../bert-large-cased-vocab.txt
-CHECKPOINT_PATH=checkpoints/4_4_dacheng_bert_pretrain
+CHECKPOINT_PATH=checkpoints/4_4_dacheng_bert_pretrain_topk_1000000
 
 options="\
        --tensor-model-parallel-size 4 \
@@ -34,11 +34,11 @@ options="\
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
-       --micro-batch-size 256 \
+       --micro-batch-size 128 \
        --global-batch-size 1024 \
        --seq-length 128 \
        --max-position-embeddings 512 \
-       --train-iters 500000 \
+       --train-iters 300000 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
@@ -49,7 +49,7 @@ options="\
        --lr 0.0001 \
        --lr-decay-style linear \
        --min-lr 0.00001 \
-       --lr-decay-iters 500000 \
+       --lr-decay-iters 300000 \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction 0.01 \
@@ -58,23 +58,25 @@ options="\
        --eval-interval 5000 \
        --eval-iters 100 \
        --fp16 \
-       --is-pipeline-compress False \
+       --is-pipeline-compress True \
        --pipeline-compress-method topk \
-       --pipeline-ae-dim 1024 \
+       --pipeline-ae-dim 100 \
        --pipeline-qr-r 10 \
-       --pipeline-k 10000 \
+       --pipeline-k 160000 \
        --pipeline-m 50 \
        --pipeline-bits 8 \
-       --is-tensor-compress False \
+       --start-pipeline-compress-rank 1 \
+       --is-tensor-compress True \
        --tensor-compress-method topk \
-       --tensor-ae-dim 50 \
+       --tensor-ae-dim 100 \
        --tensor-qr-r 10 \
-       --tensor-k 10000 \
+       --tensor-k 160000 \
        --tensor-m 50 \
        --tensor-bits 8 \
+       --start-tensor-compress-layer 12 \
        --multinode-train True "
 
 run_cmd="python -u ../pretrain_bert.py $@ ${options}"
 
 srun -l \
-     --output=results/4_4_dacheng_bert_pretrain.txt sh -c "${run_cmd}"
+     --output=results/4_4_dacheng_bert_pretrain_topk_1000000.txt sh -c "${run_cmd}"

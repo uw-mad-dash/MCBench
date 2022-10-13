@@ -1,5 +1,7 @@
 #! /bin/bash
 
+# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
+
 GPUS_PER_NODE=4
 # Change for multinode config
 MASTER_ADDR=localhost
@@ -16,8 +18,8 @@ DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_bert.py \
-       --tensor-model-parallel-size 2 \
-       --pipeline-model-parallel-size 2 \
+       --tensor-model-parallel-size 1 \
+       --pipeline-model-parallel-size 4 \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
@@ -45,19 +47,19 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --eval-interval 10000 \
        --eval-iters 100 \
        --fp16 \
-       --is-pipeline-compress False \
-       --pipeline-compress-method topk \
+       --is-pipeline-compress True \
+       --pipeline-compress-method randk_int \
        --pipeline-ae-dim 1024 \
        --pipeline-qr-r 10 \
-       --pipeline-k 10000 \
+       --pipeline-k 1600000 \
        --pipeline-m 50 \
        --pipeline-bits 8 \
        --start-pipeline-compress-rank 1 \
        --is-tensor-compress False \
-       --tensor-compress-method topk \
+       --tensor-compress-method ae \
        --tensor-ae-dim 50 \
        --tensor-qr-r 10 \
        --tensor-k 10000 \
        --tensor-m 50 \
-       --tensor-bits 8 \
+       --tensor-bits 2 \
        --start-tensor-compress-layer 12 \

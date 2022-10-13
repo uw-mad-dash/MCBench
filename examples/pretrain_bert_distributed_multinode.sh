@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 GPUS_PER_NODE=4
-MASTER_ADDR=localhost
+MASTER_ADDR=3.143.18.40
 MASTER_PORT=6000
 NNODES=4
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
@@ -14,18 +14,18 @@ DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE \
                   --master_addr $MASTER_ADDR \
                   --master_port $MASTER_PORT"
 
-DATA_PATH=../my-bert-wiki-and-book_text_sentence
+DATA_PATH=../my-book-200_text_sentence
 VOCAB_FILE=../bert-large-cased-vocab.txt
-CHECKPOINT_PATH=checkpoints/bert_pretrain_local
+CHECKPOINT_PATH=checkpoints/bert_pretrain_distributed
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_bert.py \
-       --tensor-model-parallel-size 4 \
-       --pipeline-model-parallel-size 4 \
+       --tensor-model-parallel-size 8 \
+       --pipeline-model-parallel-size 2 \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
-       --micro-batch-size 256 \
+       --micro-batch-size 128 \
        --global-batch-size 1024 \
        --seq-length 128 \
        --max-position-embeddings 512 \
@@ -44,24 +44,24 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --weight-decay 1e-2 \
        --clip-grad 1.0 \
        --lr-warmup-fraction 0.01 \
-       --log-interval 10000 \
+       --log-interval 200 \
        --save-interval 50000 \
-       --eval-interval 10000 \
+       --eval-interval 50000 \
        --eval-iters 100 \
        --fp16 \
-       --is-pipeline-compress False \
-       --pipeline-compress-method topk \
-       --pipeline-ae-dim 1024 \
+       --is-pipeline-compress True \
+       --pipeline-compress-method randk_int \
+       --pipeline-ae-dim 100 \
        --pipeline-qr-r 10 \
-       --pipeline-k 10000 \
+       --pipeline-k 800000 \
        --pipeline-m 50 \
        --pipeline-bits 8 \
-       --start-pipeline-compress-rank 1 \
-       --is-tensor-compress False \
-       --tensor-compress-method topk \
-       --tensor-ae-dim 50 \
+       --start-pipeline-compress-rank 0 \
+       --is-tensor-compress True \
+       --tensor-compress-method randk_int \
+       --tensor-ae-dim 100 \
        --tensor-qr-r 10 \
-       --tensor-k 10000 \
+       --tensor-k 800000 \
        --tensor-m 50 \
        --tensor-bits 8 \
        --start-tensor-compress-layer 12 \
