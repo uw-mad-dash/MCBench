@@ -232,27 +232,6 @@ def forward_backward_no_pipelining(forward_step_func,
     Returns dictionary with losses."""
     assert len(model) == 1
     model = model[0]
-    args = get_args()
-    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
-               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
-               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
-               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
-               + "_" + str(args.micro_batch_size) \
-               + "_" + str(args.seq_length) \
-               + "_" + str(args.is_tensor_compress) \
-               + "_" + str(args.is_pipeline_compress) \
-               + "_" + str(args.tensor_compress_method) \
-               + "_" + str(args.tensor_ae_dim) \
-               + "_" + str(args.tensor_k) \
-               + "_" + str(args.tensor_bits) \
-               + "_" + str(args.pipeline_compress_method) \
-               + "_" + str(args.pipeline_ae_dim) \
-               + "_" + str(args.pipeline_k) \
-               + "_" + str(args.pipeline_bits) + ".txt"
-    start_forward = torch.cuda.Event(enable_timing=True)
-    end_forward = torch.cuda.Event(enable_timing=True)
-    start_backward = torch.cuda.Event(enable_timing=True)
-    end_backward = torch.cuda.Event(enable_timing=True)
 
     context_handler = dummy_handler
     if isinstance(model, torchDDP):
@@ -262,40 +241,20 @@ def forward_backward_no_pipelining(forward_step_func,
     input_tensor, output_tensor_grad = None, None
     with context_handler():
         for i in range(get_num_microbatches() - 1):
-            start_forward.record()
             output_tensor = forward_step(forward_step_func, data_iterator,
                                          model, input_tensor, forward_data_store,
                                          collect_non_loss_data)
-            end_forward.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("forward step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
             if not forward_only:
-                start_backward.record()
                 backward_step(optimizer, input_tensor, output_tensor,
                               output_tensor_grad)
-                end_backward.record()
-                torch.cuda.synchronize()
-                with open(filename, 'a') as file:
-                    file.write("backward step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
 
     # Run computation for last microbatch out of context handler (want to
     # synchronize gradients).
-    start_forward.record()
     output_tensor = forward_step(forward_step_func, data_iterator,
                                  model, input_tensor, forward_data_store,
                                  collect_non_loss_data)
-    end_forward.record()
-    torch.cuda.synchronize()
-    with open(filename, 'a') as file:
-        file.write("forward step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
     if not forward_only:
-        start_backward.record()
         backward_step(optimizer, input_tensor, output_tensor, output_tensor_grad)
-        end_backward.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("backward step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
 
     return forward_data_store
 
@@ -899,30 +858,6 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
 
     assert len(model) == 1
     model = model[0]
-    filename = "../logs/" + str(mpu.get_tensor_model_parallel_world_size()) \
-               + "_" + str(mpu.get_pipeline_model_parallel_world_size()) \
-               + "_" + str(mpu.get_tensor_model_parallel_rank()) \
-               + "_" + str(mpu.get_pipeline_model_parallel_rank()) \
-               + "_" + str(args.micro_batch_size) \
-               + "_" + str(args.seq_length) \
-               + "_" + str(args.is_tensor_compress) \
-               + "_" + str(args.is_pipeline_compress) \
-               + "_" + str(args.tensor_compress_method) \
-               + "_" + str(args.tensor_ae_dim) \
-               + "_" + str(args.tensor_k) \
-               + "_" + str(args.tensor_bits) \
-               + "_" + str(args.pipeline_compress_method) \
-               + "_" + str(args.pipeline_ae_dim) \
-               + "_" + str(args.pipeline_k) \
-               + "_" + str(args.pipeline_bits) + ".txt"
-    start_comm = torch.cuda.Event(enable_timing=True)
-    end_comm = torch.cuda.Event(enable_timing=True)
-    start_forward = torch.cuda.Event(enable_timing=True)
-    end_forward = torch.cuda.Event(enable_timing=True)
-    start_backward = torch.cuda.Event(enable_timing=True)
-    end_backward = torch.cuda.Event(enable_timing=True)
-    start_deallocate = torch.cuda.Event(enable_timing=True)
-    end_deallocate = torch.cuda.Event(enable_timing=True)
 
     # Compute number of warmup microbatches.
     num_microbatches = get_num_microbatches()
@@ -957,28 +892,12 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
 
     # Run warmup forward passes.
     for i in range(num_warmup_microbatches):
-        start_comm.record()
         input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
-        end_comm.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
-        start_forward.record()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      collect_non_loss_data)
-        end_forward.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("forward_step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
-        start_comm.record()
         send_forward(output_tensor, send_tensor_shapes_forward, timers=timers)
-        end_comm.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("send_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
-        start_deallocate.record()
         if not forward_only:
             input_tensors.append(input_tensor)
             if isinstance(output_tensor[0], list):
@@ -987,34 +906,20 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
             else:
                 output_tensors.append(output_tensor)
                 deallocate_output_tensor(output_tensor[0])
-        end_deallocate.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("deallocate tensor (ms): " + str(start_deallocate.elapsed_time(end_deallocate)) + '\n')
 
     # Before running 1F1B, need to receive first forward tensor.
     # If all microbatches are run in warmup / cooldown phase, then no need to
     # receive this tensor here.
     if num_microbatches_remaining > 0:
-        start_comm.record()
         input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
-        end_comm.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
     # Run 1F1B in steady state.
     for i in range(num_microbatches_remaining):
         last_iteration = (i == (num_microbatches_remaining - 1))
 
-        start_forward.record()
         output_tensor = forward_step(forward_step_func, data_iterator, model,
                                      input_tensor, forward_data_store,
                                      collect_non_loss_data)
-        end_forward.record()
-        torch.cuda.synchronize()
-        with open(filename, 'a') as file:
-            file.write("forward_step (ms): " + str(start_forward.elapsed_time(end_forward)) + '\n')
         if forward_only:
             send_forward(output_tensor, send_tensor_shapes_forward, timers=timers)
 
@@ -1022,17 +927,11 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
                 input_tensor = recv_forward(recv_tensor_shapes_forward, timers=timers)
 
         else:
-            start_comm.record()
             output_tensor_grad = \
                 send_forward_recv_backward(output_tensor,
                                            send_tensor_shapes_forward,
                                            timers=timers)
-            end_comm.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("send_forward_recv_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
             # Add input_tensor and output_tensor to end of list.
-            start_deallocate.record()
             input_tensors.append(input_tensor)
             if isinstance(output_tensor[0], list):
                 output_tensors.append([output_tensor[0][0]])
@@ -1040,17 +939,12 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
             else:
                 output_tensors.append(output_tensor)
                 deallocate_output_tensor(output_tensor[0])
-            end_deallocate.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("deallocate tensor (ms): " + str(start_deallocate.elapsed_time(end_deallocate)) + '\n')
 
             # Pop input_tensor and output_tensor from the start of the list for
             # the backward pass.
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
-            start_backward.record()
             if len(input_tensor) > 1:
                 input_tensor_grad = \
                     backward_step(optimizer, input_tensor[0], output_tensor,
@@ -1059,45 +953,25 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
                 input_tensor_grad = \
                     backward_step(optimizer, input_tensor, output_tensor,
                                   output_tensor_grad)
-            end_backward.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("backward_step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
             # input_tensor_grad = \
             #     backward_step(optimizer, input_tensor, output_tensor,
             #                   output_tensor_grad)
 
             if last_iteration:
                 input_tensor = None
-                start_comm.record()
                 send_backward(input_tensor_grad, send_tensor_shapes_backward, timers=timers)
-                end_comm.record()
-                torch.cuda.synchronize()
-                with open(filename, 'a') as file:
-                    file.write("send_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
             else:
-                start_comm.record()
                 input_tensor = \
                     send_backward_recv_forward(
                         input_tensor_grad, recv_tensor_shapes_forward, timers=timers)
-                end_comm.record()
-                torch.cuda.synchronize()
-                with open(filename, 'a') as file:
-                    file.write("send_backward_recv_forward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
     # Run cooldown backward passes.
     if not forward_only:
         for i in range(num_warmup_microbatches):
             input_tensor = input_tensors.pop(0)
             output_tensor = output_tensors.pop(0)
 
-            start_comm.record()
             output_tensor_grad = recv_backward(recv_tensor_shapes_backward, timers=timers)
-            end_comm.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("recv_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
-            start_backward.record()
             if len(input_tensor) > 1:
                 input_tensor_grad = \
                     backward_step(optimizer, input_tensor[0], output_tensor,
@@ -1106,19 +980,10 @@ def forward_backward_pipelining_without_interleaving(forward_step_func,
                 input_tensor_grad = \
                     backward_step(optimizer, input_tensor, output_tensor,
                                   output_tensor_grad)
-            end_backward.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("backward_step (ms): " + str(start_backward.elapsed_time(end_backward)) + '\n')
             # input_tensor_grad = \
             #     backward_step(optimizer, input_tensor, output_tensor,
             #                   output_tensor_grad)
 
-            start_comm.record()
             send_backward(input_tensor_grad, send_tensor_shapes_backward, timers=timers)
-            end_comm.record()
-            torch.cuda.synchronize()
-            with open(filename, 'a') as file:
-                file.write("send_backward (ms): " + str(start_comm.elapsed_time(end_comm)) + '\n')
 
     return forward_data_store

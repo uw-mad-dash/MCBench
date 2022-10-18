@@ -10,24 +10,23 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../glue_data/MRPC/msr_paraphrase_train.txt"
-VALID_DATA="../glue_data/MRPC/msr_paraphrase_test.txt"
+TRAIN_DATA="../glue_data/CoLA/train.tsv"
+VALID_DATA="../glue_data/CoLA/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
 PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
-#PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split
 #PRETRAINED_CHECKPOINT=checkpoints/bert_345m
 CHECKPOINT_PATH=checkpoints/bert_345m_cola
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-model-parallel-size 1 \
                --pipeline-model-parallel-size 4 \
-               --task MRPC \
+               --task CoLA \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \
                --tokenizer-type BertWordPieceLowerCase \
                --vocab-file $VOCAB_FILE \
-               --epochs 5 \
+               --epochs 3 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 24 \
                --hidden-size 1024 \
@@ -45,7 +44,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-method randk_int \
+               --pipeline-compress-method topk_int \
                --pipeline-ae-dim 50 \
                --pipeline-qr-r 10 \
                --pipeline-k 400000 \

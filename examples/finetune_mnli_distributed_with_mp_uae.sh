@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 #SBATCH --job-name=ft_mnli    # create a short name for your job
-#SBATCH --output=results/1_4_mnli_32_512_randk_1000000.txt
+#SBATCH --output=results/1_4_mnli_8_512_topk_int_200000.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem=64G                 # total memory per node (4 GB per cpu-core is default)
 #SBATCH --gres=gpu:4            # number of gpus per node
-#SBATCH --time=202:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=5:00:00          # total run time limit (HH:MM:SS)
 
 WORLD_SIZE=4
 
@@ -41,7 +41,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 32 \
+               --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
@@ -54,19 +54,19 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-method randk \
-               --pipeline-ae-dim 100 \
+               --pipeline-compress-method topk_int \
+               --pipeline-ae-dim 50 \
                --pipeline-qr-r 30 \
-               --pipeline-k 1000000 \
+               --pipeline-k 200000 \
                --pipeline-m 50 \
-               --pipeline-bits 4 \
+               --pipeline-bits 8 \
                --start-pipeline-compress-rank 1 \
                --is-tensor-compress False \
-               --tensor-compress-method ae \
+               --tensor-compress-method quantize \
                --tensor-ae-dim 100 \
                --tensor-qr-r 30 \
-               --tensor-k 10000 \
+               --tensor-k 80000 \
                --tensor-m 50 \
-               --tensor-bits 4 \
+               --tensor-bits 2 \
                --start-tensor-compress-layer 12 \
 

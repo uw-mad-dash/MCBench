@@ -586,12 +586,6 @@ class RowParallelLinear(torch.nn.Module):
 
     def forward(self, input_):
         # Set up backprop all-reduce.
-        start_encoder = torch.cuda.Event(enable_timing=True)
-        end_encoder = torch.cuda.Event(enable_timing=True)
-        start_all_reduce = torch.cuda.Event(enable_timing=True)
-        end_all_reduce = torch.cuda.Event(enable_timing=True)
-        start_decoder = torch.cuda.Event(enable_timing=True)
-        end_decoder = torch.cuda.Event(enable_timing=True)
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -612,43 +606,18 @@ class RowParallelLinear(torch.nn.Module):
         else:
             if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer:
                 if self.tensor_compress_method == 'ae':
-                    start_encoder.record()
                     output_parallel = F.linear(output_parallel, self.encoder)
-                    end_encoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                    start_all_reduce.record()
                     if self.sequence_parallel:
                         output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
                     else:
                         output_ = reduce_from_tensor_model_parallel_region(output_parallel)
-                    end_all_reduce.record()
-                    torch.cuda.synchronize()
-                    print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                    start_decoder.record()
                     output_ = F.linear(output_, self.decoder)
-                    end_decoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                 elif self.tensor_compress_method == "topk_int":
-                    start_encoder.record()
                     value, indices, input_abs_size, input_abs_seq_size = \
                         topk.encoder(output_parallel, k=self.k)
-                    end_encoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                    start_all_reduce.record()
                     value_res = gather_from_tensor_model_parallel_region(value)
                     indices_res = gather_from_tensor_model_parallel_region(indices)
-                    end_all_reduce.record()
-                    torch.cuda.synchronize()
-                    print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                    start_decoder.record()
                     world_size = get_tensor_model_parallel_world_size()
                     output_ = output_parallel
                     for i in range(0, world_size):
@@ -661,26 +630,12 @@ class RowParallelLinear(torch.nn.Module):
                                            + topk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                           indices_res[i * self.k: (i + 1) * self.k],
                                                           input_abs_size, input_abs_seq_size).data
-                    end_decoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                 elif self.tensor_compress_method == "randk_int":
-                    start_encoder.record()
                     value, indices, input_abs_size, input_abs_seq_size = \
                         randk.encoder(output_parallel, k=self.k)
-                    end_encoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                    start_all_reduce.record()
                     value_res = gather_from_tensor_model_parallel_region(value)
                     indices_res = gather_from_tensor_model_parallel_region(indices)
-                    end_all_reduce.record()
-                    torch.cuda.synchronize()
-                    print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                    start_decoder.record()
                     world_size = get_tensor_model_parallel_world_size()
                     output_ = output_parallel
                     for i in range(0, world_size):
@@ -693,27 +648,13 @@ class RowParallelLinear(torch.nn.Module):
                                            + randk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                            indices_res[i * self.k: (i + 1) * self.k],
                                                            input_abs_size, input_abs_seq_size).data
-                    end_decoder.record()
-                    torch.cuda.synchronize()
-                    print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                 elif self.tensor_compress_method == "quantize":
                     if args.tensor_bits == 8:
-                        start_encoder.record()
                         batch_size, seq_length, hidden_state = output_parallel.size()
                         output_parallel.data, scale = quantize.compress_8bit(output_parallel.data)
-                        end_encoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                        start_all_reduce.record()
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
-                        end_all_reduce.record()
-                        torch.cuda.synchronize()
-                        print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                        start_decoder.record()
                         world_size = get_tensor_model_parallel_world_size()
                         for i in range(0, world_size):
                             if i == 0:
@@ -727,26 +668,12 @@ class RowParallelLinear(torch.nn.Module):
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
                                 ).data
                         output_ = output_parallel
-                        end_decoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                     elif args.tensor_bits == 4:
-                        start_encoder.record()
                         batch_size, seq_length, hidden_state = output_parallel.size()
                         output_parallel.data, scale = quantize.compress_4bit(output_parallel.data)
-                        end_encoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                        start_all_reduce.record()
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
-                        end_all_reduce.record()
-                        torch.cuda.synchronize()
-                        print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                        start_decoder.record()
                         world_size = get_tensor_model_parallel_world_size()
                         for i in range(0, world_size):
                             if i == 0:
@@ -760,26 +687,12 @@ class RowParallelLinear(torch.nn.Module):
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
                                 ).data
                         output_ = output_parallel
-                        end_decoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                     elif args.tensor_bits == 2:
-                        start_encoder.record()
                         batch_size, seq_length, hidden_state = output_parallel.size()
                         output_parallel.data, scale = quantize.compress_2bit(output_parallel.data)
-                        end_encoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor encoder (ms): ", start_encoder.elapsed_time(end_encoder))
-
-                        start_all_reduce.record()
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
-                        end_all_reduce.record()
-                        torch.cuda.synchronize()
-                        print("all reduce (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
-
-                        start_decoder.record()
                         world_size = get_tensor_model_parallel_world_size()
                         for i in range(0, world_size):
                             if i == 0:
@@ -793,9 +706,6 @@ class RowParallelLinear(torch.nn.Module):
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
                                 ).data
                         output_ = output_parallel
-                        end_decoder.record()
-                        torch.cuda.synchronize()
-                        print("tensor decoder (ms): ", start_decoder.elapsed_time(end_decoder))
 
                 elif self.tensor_compress_method == 'quantize_float':
                     if args.tensor_bits == 8:
@@ -1083,14 +993,10 @@ class RowParallelLinear(torch.nn.Module):
                     raise ValueError("Tensor Compression Method is Wrong")
 
             else:
-                start_all_reduce.record()
                 if self.sequence_parallel:
                     output_ = reduce_scatter_to_sequence_parallel_region(output_parallel)
                 else:
                     output_ = reduce_from_tensor_model_parallel_region(output_parallel)
-                end_all_reduce.record()
-                torch.cuda.synchronize()
-                print("all reduce without compression (ms): ", start_all_reduce.elapsed_time(end_all_reduce))
 
         if not self.skip_bias_add:
             output = output_ + self.bias if self.bias is not None else output_

@@ -18,3 +18,4 @@ megatron/fused_kernels/build
 logs*
 parse_logs
 my-book-200_text_sentence*
+tools/split.txt

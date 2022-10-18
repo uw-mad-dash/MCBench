@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# compress method in [ae, quantize, topk, randk, topk_feedback, randk_feedback, qr]
+# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 #SBATCH --job-name=ft_rte    # create a short name for your job
-#SBATCH --output=results/1_4_rte_32_512_topk_1000000.txt
+#SBATCH --output=results/4_1_rte_8_512_quantize_2.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
 #SBATCH --mem=64G                 # total memory per node (4 GB per cpu-core is default)
 #SBATCH --gres=gpu:4            # number of gpus per node
-#SBATCH --time=202:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=2:00:00          # total run time limit (HH:MM:SS)
 
 WORLD_SIZE=4
 
@@ -22,13 +22,13 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/RTE/train.tsv"
 VALID_DATA="../glue_data/RTE/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
+PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4t
 #PRETRAINED_CHECKPOINT=checkpoints/bert_book_pretrain_1000000_256
 CHECKPOINT_PATH=checkpoints/bert_345m_rte
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 4 \
+               --tensor-model-parallel-size 4 \
+               --pipeline-model-parallel-size 1 \
                --task RTE \
                --seed 1234 \
                --train-data $TRAIN_DATA \
@@ -40,7 +40,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 32 \
+               --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
@@ -52,19 +52,19 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress True \
-               --pipeline-compress-method topk \
-               --pipeline-ae-dim 100 \
+               --is-pipeline-compress False \
+               --pipeline-compress-method ae \
+               --pipeline-ae-dim 50 \
                --pipeline-qr-r 30 \
-               --pipeline-k 1000000 \
+               --pipeline-k 200000 \
                --pipeline-m 50 \
-               --pipeline-bits 4 \
-               --start-pipeline-compress-rank 1 \
-               --is-tensor-compress False \
-               --tensor-compress-method ae \
+               --pipeline-bits 8 \
+               --start-pipeline-compress-rank 0 \
+               --is-tensor-compress True \
+               --tensor-compress-method quantize \
                --tensor-ae-dim 100 \
                --tensor-qr-r 30 \
-               --tensor-k 10000 \
+               --tensor-k 80000 \
                --tensor-m 50 \
-               --tensor-bits 4 \
+               --tensor-bits 2 \
                --start-tensor-compress-layer 12 \
