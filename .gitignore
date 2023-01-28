@@ -4,6 +4,8 @@ __pycache__
 RACE.tar.gz
 bert-large-cased-vocab.txt
 bert-large-uncased-vocab.txt
+bert-base-cased-vocab.txt
+bert-base-uncased-vocab.txt
 glue_data
 download_glue_data.py
 megatron_bert_345m_v0.1_cased.zip
@@ -19,3 +21,10 @@ logs*
 parse_logs
 my-book-200_text_sentence*
 tools/split.txt
+visualization*
+performance*
+gpt2-merges.txt
+gpt2-vocab.json
+lambada_test.jsonl
+megatron_lm_345m_v0.0.zip
+wikitext-103-v1.zip
