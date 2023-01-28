@@ -347,6 +347,8 @@ def str2bool(str):
 def _add_compression_args(parser):
     group = parser.add_argument_group(title='compression')
 
+    group.add_argument("--is-pretrain-single-machine", type=str2bool, default=False,
+                       help='whether do pretrain on single machine with tensor and pipeline compression')
     group.add_argument('--is-pipeline-compress', type=str2bool, default=False,
                        help='whether do pipeline compression.')
     group.add_argument('--pipeline-compress-method', type=str, default='ae',
@@ -878,7 +880,9 @@ def _add_data_args(parser):
     group.add_argument('--tokenizer-type', type=str,
                        default=None,
                        choices=['BertWordPieceLowerCase',
-                                'BertWordPieceCase',
+                                'BertBaseNV',
+                                'BertBaseHF',
+                                'BertBaseWordPieceLowerCase',
                                 'GPT2BPETokenizer'],
                        help='What type of tokenizer to use.')
     group.add_argument('--data-impl', type=str, default='infer',

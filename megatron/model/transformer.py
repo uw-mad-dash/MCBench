@@ -1503,38 +1503,49 @@ class ParallelTransformer(MegatronModule):
             self.num_layers = 1
             self.layers = torch.nn.ModuleList([ NoopTransformerLayer(1) ])
         else:
-            if args.is_pipeline_compress:
+            if args.is_pretrain_single_machine and args.is_pipeline_compress:
                 layers_list = []
-                # we can change the threshold for pipeline model parallel rank
-                # to custom the number of compression
-                start_rank = args.start_pipeline_compress_rank
-                if mpu.get_pipeline_model_parallel_rank() == start_rank:
-                    for i in range(self.num_layers):
-                        if i == self.num_layers - 1:
-                            layers_list.append(build_encoder_layer(i + 1 + offset))
-                        else:
-                            layers_list.append(build_layer(i + 1 + offset))
-                elif mpu.get_pipeline_model_parallel_rank() == mpu.get_pipeline_model_parallel_world_size() - 1:
-                    for i in range(self.num_layers):
-                        if i == 0:
-                            layers_list.append(build_decoder_layer(i + 1 + offset))
-                        else:
-                            layers_list.append(build_layer(i + 1 + offset))
-                elif mpu.get_pipeline_model_parallel_rank() < start_rank:
-                    for i in range(self.num_layers):
+                for i in range(self.num_layers):
+                    if i + 1 == 12 or i + 1 == 18:
+                        layers_list.append(build_encoder_layer(i + 1 + offset))
+                    elif i + 1 == 13 or i + 1 == 19:
+                        layers_list.append(build_decoder_layer(i + 1 + offset))
+                    else:
                         layers_list.append(build_layer(i + 1 + offset))
-                else:
-                    for i in range(self.num_layers):
-                        if i == 0:
-                            layers_list.append(build_decoder_layer(i + 1 + offset))
-                        elif i == self.num_layers - 1:
-                            layers_list.append(build_encoder_layer(i + 1 + offset))
-                        else:
-                            layers_list.append(build_layer(i + 1 + offset))
-                self.layers = torch.nn.ModuleList(layers_list)
+                    self.layers = torch.nn.ModuleList(layers_list)
             else:
-                self.layers = torch.nn.ModuleList(
-                    [build_layer(i + 1 + offset) for i in range(self.num_layers)])
+                if args.is_pipeline_compress:
+                    layers_list = []
+                    # we can change the threshold for pipeline model parallel rank
+                    # to custom the number of compression
+                    start_rank = args.start_pipeline_compress_rank
+                    if mpu.get_pipeline_model_parallel_rank() == start_rank:
+                        for i in range(self.num_layers):
+                            if i == self.num_layers - 1:
+                                layers_list.append(build_encoder_layer(i + 1 + offset))
+                            else:
+                                layers_list.append(build_layer(i + 1 + offset))
+                    elif mpu.get_pipeline_model_parallel_rank() == mpu.get_pipeline_model_parallel_world_size() - 1:
+                        for i in range(self.num_layers):
+                            if i == 0:
+                                layers_list.append(build_decoder_layer(i + 1 + offset))
+                            else:
+                                layers_list.append(build_layer(i + 1 + offset))
+                    elif mpu.get_pipeline_model_parallel_rank() < start_rank:
+                        for i in range(self.num_layers):
+                            layers_list.append(build_layer(i + 1 + offset))
+                    else:
+                        for i in range(self.num_layers):
+                            if i == 0:
+                                layers_list.append(build_decoder_layer(i + 1 + offset))
+                            elif i == self.num_layers - 1:
+                                layers_list.append(build_encoder_layer(i + 1 + offset))
+                            else:
+                                layers_list.append(build_layer(i + 1 + offset))
+                    self.layers = torch.nn.ModuleList(layers_list)
+                else:
+                    self.layers = torch.nn.ModuleList(
+                        [build_layer(i + 1 + offset) for i in range(self.num_layers)])
 
         if self.post_process and self.post_layer_norm:
             # Final layer norm before output.
