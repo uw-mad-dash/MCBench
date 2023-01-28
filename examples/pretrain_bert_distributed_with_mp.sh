@@ -16,18 +16,18 @@ CHECKPOINT_PATH=checkpoints/bert_pretrain_local
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
 
-python -m torch.distributed.launch $DISTRIBUTED_ARGS \
+python3 -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_bert.py \
        --tensor-model-parallel-size 1 \
        --pipeline-model-parallel-size 4 \
-       --num-layers 24 \
+       --num-layers 12 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
-       --micro-batch-size 64 \
-       --global-batch-size 256 \
+       --micro-batch-size 128 \
+       --global-batch-size 1024 \
        --seq-length 128 \
        --max-position-embeddings 512 \
-       --train-iters 1000000 \
+       --train-iters 200 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
@@ -47,19 +47,20 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --eval-interval 10000 \
        --eval-iters 100 \
        --fp16 \
-       --is-pipeline-compress True \
-       --pipeline-compress-method randk_int \
-       --pipeline-ae-dim 1024 \
+       --is-pipeline-compress False \
+       --pipeline-compress-method ae \
+       --pipeline-ae-dim 50 \
        --pipeline-qr-r 10 \
        --pipeline-k 1600000 \
        --pipeline-m 50 \
        --pipeline-bits 8 \
-       --start-pipeline-compress-rank 1 \
+       --start-pipeline-compress-rank 0 \
        --is-tensor-compress False \
        --tensor-compress-method ae \
        --tensor-ae-dim 50 \
        --tensor-qr-r 10 \
-       --tensor-k 10000 \
+       --tensor-k 1600000 \
        --tensor-m 50 \
-       --tensor-bits 2 \
-       --start-tensor-compress-layer 12 \
+       --tensor-bits 8 \
+       --start-tensor-compress-layer 0 \
+#       --is-pretrain-single-machine True \

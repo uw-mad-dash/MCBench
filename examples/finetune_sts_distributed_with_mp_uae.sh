@@ -3,7 +3,7 @@
 # compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 #SBATCH --job-name=ft_sts    # create a short name for your job
-#SBATCH --output=results/1_4_sts_32_128_topk_int_80000.txt
+#SBATCH --output=results/4_1_sts_pretrain_topk_int_1600000.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -22,13 +22,13 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/STS-B/train.tsv"
 VALID_DATA="../glue_data/STS-B/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
-#PRETRAINED_CHECKPOINT=checkpoints/bert_book_pretrain_1000000_256
+#PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
+PRETRAINED_CHECKPOINT=checkpoints/4_1_bert_book_pretrain_topk_int_1600000
 CHECKPOINT_PATH=checkpoints/bert_345m_sts
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 4 \
+               --tensor-model-parallel-size 4 \
+               --pipeline-model-parallel-size 1 \
                --task STS \
                --seed 1234 \
                --train-data $TRAIN_DATA \
@@ -43,7 +43,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --micro-batch-size 32 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 128 \
+               --seq-length 512 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --save $CHECKPOINT_PATH \
@@ -52,7 +52,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress True \
+               --is-pipeline-compress False \
                --pipeline-compress-method topk_int \
                --pipeline-ae-dim 100 \
                --pipeline-qr-r 30 \

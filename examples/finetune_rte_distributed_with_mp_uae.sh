@@ -3,7 +3,7 @@
 # compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 #SBATCH --job-name=ft_rte    # create a short name for your job
-#SBATCH --output=results/4_1_rte_8_512_quantize_2.txt
+#SBATCH --output=results/4_1_rte_pretrain_topk_int_1600000.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -22,8 +22,8 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/RTE/train.tsv"
 VALID_DATA="../glue_data/RTE/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4t
-#PRETRAINED_CHECKPOINT=checkpoints/bert_book_pretrain_1000000_256
+#PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
+PRETRAINED_CHECKPOINT=checkpoints/4_1_bert_book_pretrain_topk_int_1600000
 CHECKPOINT_PATH=checkpoints/bert_345m_rte
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
@@ -40,7 +40,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 8 \
+               --micro-batch-size 32 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
@@ -53,14 +53,14 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress False \
-               --pipeline-compress-method ae \
-               --pipeline-ae-dim 50 \
+               --pipeline-compress-method quantize \
+               --pipeline-ae-dim 100 \
                --pipeline-qr-r 30 \
-               --pipeline-k 200000 \
+               --pipeline-k 80000 \
                --pipeline-m 50 \
-               --pipeline-bits 8 \
+               --pipeline-bits 2 \
                --start-pipeline-compress-rank 0 \
-               --is-tensor-compress True \
+               --is-tensor-compress False \
                --tensor-compress-method quantize \
                --tensor-ae-dim 100 \
                --tensor-qr-r 30 \

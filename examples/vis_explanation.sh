@@ -10,53 +10,54 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6000"
 
-TRAIN_DATA="../glue_data/RTE/train.tsv"
-VALID_DATA="../glue_data/RTE/dev.tsv"
-VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
+TRAIN_DATA="../glue_data/CoLA/train.tsv"
+VALID_DATA="../glue_data/CoLA/dev.tsv"
+VOCAB_FILE="../bert-base-cased-vocab.txt"
+#VOCAB_FILE="../bert-large-cased-vocab.txt"
+PRETRAINED_CHECKPOINT=checkpoints/bert_base_hf_cola
 #PRETRAINED_CHECKPOINT=checkpoints/bert_345m
-CHECKPOINT_PATH=checkpoints/bert_345m_rte
+#CHECKPOINT_PATH=checkpoints/bert_base_hf_cola
 
-python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 2 \
-               --pipeline-model-parallel-size 2 \
-               --task RTE \
+python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
+               --tensor-model-parallel-size 1 \
+               --pipeline-model-parallel-size 4 \
+               --task CoLA \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \
-               --tokenizer-type BertWordPieceLowerCase \
+               --tokenizer-type BertBaseHF \
                --vocab-file $VOCAB_FILE \
-               --epochs 3 \
+               --epochs 1 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
-               --num-layers 24 \
-               --hidden-size 1024 \
-               --num-attention-heads 16 \
-               --micro-batch-size 8 \
-               --lr 5.0e-5 \
+               --num-layers 12 \
+               --hidden-size 768 \
+               --num-attention-heads 12 \
+               --micro-batch-size 32 \
+               --lr 0.0 \
                --lr-warmup-fraction 0.065 \
                --seq-length 128 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
-               --save $CHECKPOINT_PATH \
                --log-interval 10 \
                --eval-interval 100 \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
+               --layernorm-epsilon 1e-12 \
                --fp16 \
                --is-pipeline-compress True \
                --pipeline-compress-method quantize \
                --pipeline-ae-dim 100 \
                --pipeline-qr-r 10 \
-               --pipeline-k 100000 \
+               --pipeline-k 400000 \
                --pipeline-m 50 \
-               --pipeline-bits 2 \
-               --start-pipeline-compress-rank 0 \
-               --is-tensor-compress True \
+               --pipeline-bits 8 \
+               --start-pipeline-compress-rank 2 \
+               --is-tensor-compress False \
                --tensor-compress-method quantize \
                --tensor-ae-dim 100 \
                --tensor-qr-r 10 \
                --tensor-k 100000 \
                --tensor-m 50 \
                --tensor-bits 2 \
-               --start-tensor-compress-layer 12 \
+               --start-tensor-compress-layer 6 \
 

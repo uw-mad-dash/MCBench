@@ -35,7 +35,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 512 \
+               --seq-length 128 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --save $CHECKPOINT_PATH \
@@ -48,7 +48,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --pipeline-compress-method topk_int \
                --pipeline-ae-dim 50 \
                --pipeline-qr-r 10 \
-               --pipeline-k 400000 \
+               --pipeline-k 10000 \
                --pipeline-m 50 \
                --pipeline-bits 2 \
                --start-pipeline-compress-rank 0 \
@@ -56,7 +56,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --tensor-compress-method topk_int \
                --tensor-ae-dim 50 \
                --tensor-qr-r 10 \
-               --tensor-k 400000 \
+               --tensor-k 10000 \
                --tensor-m 50 \
                --tensor-bits 8 \
                --start-tensor-compress-layer 12 \

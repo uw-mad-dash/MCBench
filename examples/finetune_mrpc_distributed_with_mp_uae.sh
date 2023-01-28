@@ -3,7 +3,7 @@
 # compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 #SBATCH --job-name=ft_mrpc    # create a short name for your job
-#SBATCH --output=results/1_4_mrpc_8_512_quantize_2.txt
+#SBATCH --output=results/4_1_mrpc_pretrain_topk_int_1600000.txt
 #SBATCH --nodes=1                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=16        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -22,13 +22,13 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/MRPC/msr_paraphrase_train.txt"
 VALID_DATA="../glue_data/MRPC/msr_paraphrase_test.txt"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
-#PRETRAINED_CHECKPOINT=checkpoints/bert_book_pretrain_1000000_4_256
+#PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
+PRETRAINED_CHECKPOINT=checkpoints/4_1_bert_book_pretrain_topk_int_1600000
 CHECKPOINT_PATH=checkpoints/bert_345m_mrpc
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 4 \
+               --tensor-model-parallel-size 4 \
+               --pipeline-model-parallel-size 1 \
                --task MRPC \
                --seed 1234 \
                --train-data $TRAIN_DATA \
@@ -40,7 +40,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 8 \
+               --micro-batch-size 32 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
                --seq-length 512 \
@@ -52,19 +52,19 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress True \
-               --pipeline-compress-method quantize \
-               --pipeline-ae-dim 50 \
+               --is-pipeline-compress False \
+               --pipeline-compress-method ae \
+               --pipeline-ae-dim 100 \
                --pipeline-qr-r 30 \
-               --pipeline-k 80000 \
+               --pipeline-k 20000 \
                --pipeline-m 50 \
-               --pipeline-bits 2 \
-               --start-pipeline-compress-rank 1 \
+               --pipeline-bits 8 \
+               --start-pipeline-compress-rank 0 \
                --is-tensor-compress False \
-               --tensor-compress-method topk_int \
-               --tensor-ae-dim 50 \
+               --tensor-compress-method ae \
+               --tensor-ae-dim 100 \
                --tensor-qr-r 30 \
-               --tensor-k 40000 \
+               --tensor-k 20000 \
                --tensor-m 50 \
-               --tensor-bits 2 \
+               --tensor-bits 8 \
                --start-tensor-compress-layer 12 \

@@ -13,13 +13,13 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/STS-B/train.tsv"
 VALID_DATA="../glue_data/STS-B/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_4p
+PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
 #PRETRAINED_CHECKPOINT=checkpoints/bert_345m
 CHECKPOINT_PATH=checkpoints/bert_345m_sts
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 4 \
+               --tensor-model-parallel-size 2 \
+               --pipeline-model-parallel-size 2 \
                --task STS \
                --seed 1234 \
                --train-data $TRAIN_DATA \
@@ -34,7 +34,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 512 \
+               --seq-length 128 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --save $CHECKPOINT_PATH \
@@ -44,18 +44,18 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --weight-decay 1.0e-1 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-method topk_int \
+               --pipeline-compress-method quantize \
                --pipeline-ae-dim 50 \
                --pipeline-qr-r 10 \
-               --pipeline-k 400000 \
+               --pipeline-k 100000 \
                --pipeline-m 50 \
-               --pipeline-bits 2 \
-               --start-pipeline-compress-rank 1 \
-               --is-tensor-compress False \
-               --tensor-compress-method ae \
+               --pipeline-bits 8 \
+               --start-pipeline-compress-rank 0 \
+               --is-tensor-compress True \
+               --tensor-compress-method quantize \
                --tensor-ae-dim 50 \
                --tensor-qr-r 10 \
-               --tensor-k 400000 \
+               --tensor-k 100000 \
                --tensor-m 50 \
                --tensor-bits 8 \
                --start-tensor-compress-layer 12 \

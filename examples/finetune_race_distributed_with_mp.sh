@@ -12,7 +12,7 @@ TRAIN_DATA="/home/wisr/song/Megatron-LM/RACE/train/middle"
 VALID_DATA="/home/wisr/song/Megatron-LM/RACE/dev/middle \
             /home/wisr/song/Megatron-LM/RACE/dev/high"
 VOCAB_FILE="/home/wisr/song/Megatron-LM/bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=../bert_cased/release/mp_rank_00/model_optim_rng.pt
+PRETRAINED_CHECKPOINT=../bert_cased/release/mp_rank_00/bert_base_hf.pt
 CHECKPOINT_PATH=checkpoints/bert_345m_race
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
