@@ -28,6 +28,79 @@ from tasks.vision.finetune_utils import build_data_loader
 from tasks.vision.finetune_utils import process_batch
 from torchvision import datasets, transforms
 
+from datasets import load_dataset
+from transformers import ViTImageProcessor
+from torchvision.transforms import (
+    CenterCrop,
+    Compose,
+    Normalize,
+    Resize,
+    ToTensor,
+    ConvertImageDtype,
+)
+
+
+def accuracy_func_provider_vit():
+    """Provide function that calculates accuracies."""
+    args = get_args()
+    dataset = load_dataset(
+        args.dataset_name,
+        None,
+        cache_dir=args.cache_dir,
+        task="image-classification",
+        use_auth_token=False,
+    )
+    image_processor = ViTImageProcessor.from_pretrained(
+        "google/vit-base-patch16-224-in21k",
+        cache_dir=args.cache_dir,
+        revision="main",
+        use_auth_token=False,
+    )
+
+    # Define torchvision transforms to be applied to each image.
+    if "shortest_edge" in image_processor.size:
+        size = image_processor.size["shortest_edge"]
+    else:
+        size = (image_processor.size["height"], image_processor.size["width"])
+    normalize = Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+    data_type = torch.half if args.fp16 else torch.float32
+    _test_transforms = Compose(
+        [
+            Resize(size),
+            CenterCrop(size),
+            ToTensor(),
+            normalize,
+            ConvertImageDtype(data_type)
+        ]
+    )
+
+    def test_transforms(example_batch):
+        """Apply _val_transforms across a batch."""
+        example_batch["pixel_values"] = [_test_transforms(pil_img.convert("RGB")) for pil_img in
+                                         example_batch["image"]]
+        return example_batch
+
+    dataset["test"].set_transform(test_transforms)
+
+    dataloader = build_data_loader(
+        dataset["test"],
+        args.micro_batch_size,
+        num_workers=args.num_workers,
+        drop_last=(mpu.get_data_parallel_world_size() > 1),
+        shuffle=False,
+    )
+
+    def metrics_func(model, epoch):
+        print_rank_0("calculating metrics ...")
+        correct, total = calculate_correct_answers(model, dataloader, epoch)
+        percent = float(correct) * 100.0 / float(total)
+        print_rank_last(
+            " >> |epoch: {}| overall: correct / total = {} / {} = "
+            "{:.4f} %".format(epoch, correct, total, percent)
+        )
+
+    return metrics_func
+
 
 def accuracy_func_provider():
     """Provide function that calculates accuracies."""

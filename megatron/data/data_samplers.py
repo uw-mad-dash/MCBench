@@ -24,6 +24,48 @@ from megatron import get_args
 from megatron import mpu
 
 
+def collate_fn(examples):
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    labels = torch.tensor([example["labels"] for example in examples])
+    return {"pixel_values": pixel_values, "labels": labels}
+
+
+def build_pretraining_data_loader_vit(dataset, consumed_samples):
+    """Buld dataloader given an input dataset."""
+
+    if dataset is None:
+        return None
+    args = get_args()
+
+    # Megatron sampler
+    if args.dataloader_type == 'single':
+        batch_sampler = MegatronPretrainingSampler(
+            total_samples=len(dataset),
+            consumed_samples=consumed_samples,
+            micro_batch_size=args.micro_batch_size,
+            data_parallel_rank=mpu.get_data_parallel_rank(),
+            data_parallel_size=mpu.get_data_parallel_world_size())
+    elif args.dataloader_type == 'cyclic':
+        batch_sampler = MegatronPretrainingRandomSampler(
+            dataset,
+            total_samples=len(dataset),
+            consumed_samples=consumed_samples,
+            micro_batch_size=args.micro_batch_size,
+            data_parallel_rank=mpu.get_data_parallel_rank(),
+            data_parallel_size=mpu.get_data_parallel_world_size(),
+            data_sharding=args.data_sharding)
+    else:
+        raise Exception('{} dataloader type is not supported.'.format(
+                args.dataloader_type))
+
+    # Torch dataloader.
+    return torch.utils.data.DataLoader(dataset,
+                                       batch_sampler=batch_sampler,
+                                       num_workers=args.num_workers,
+                                       collate_fn=collate_fn,
+                                       pin_memory=True)
+
+
 def build_pretraining_data_loader(dataset, consumed_samples):
     """Buld dataloader given an input dataset."""
 

@@ -21,7 +21,7 @@ from megatron import get_args
 from megatron import print_rank_0
 from megatron import get_timers
 from megatron import mpu, utils
-from megatron.checkpointing import load_checkpoint
+from megatron.checkpointing import load_checkpoint, load_checkpoint_vit
 from megatron.checkpointing import save_checkpoint
 from megatron.training import evaluate_and_print_results
 from megatron.training import setup_model_and_optimizer
@@ -36,9 +36,15 @@ from megatron.model import Float16Module, ModelType
 
 def process_batch(batch):
     """Process batch and produce inputs for the model."""
-    images = batch[0].cuda().contiguous()
-    labels = batch[1].cuda().contiguous()
+    images = batch['pixel_values'].cuda().contiguous()
+    labels = batch['labels'].cuda().contiguous()
     return images, labels
+
+
+def collate_fn(examples):
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    labels = torch.tensor([example["labels"] for example in examples])
+    return {"pixel_values": pixel_values, "labels": labels}
 
 
 def build_data_loader(dataset, micro_batch_size,
@@ -61,6 +67,7 @@ def build_data_loader(dataset, micro_batch_size,
         shuffle=False,
         num_workers=num_workers,
         drop_last=drop_last,
+        collate_fn=collate_fn,
         pin_memory=True,
     )
 
@@ -141,8 +148,8 @@ def _train(
         print_rank_0("working on epoch {} ...".format(epoch + 1))
 
         # Set the data loader epoch to shuffle the index iterator.
-        train_dataloader.sampler.set_epoch(args.seed + epoch)
-        train_dataloader.dataset.set_epoch(epoch)
+        # train_dataloader.sampler.set_epoch(args.seed + epoch)
+        # train_dataloader.dataset.set_epoch(epoch)
 
         # For all the batches in the dataset.
         for iteration_, batch in enumerate(train_dataloader):
@@ -251,7 +258,7 @@ def finetune(
         if args.pretrained_checkpoint_type == 'default':
             original_load = args.load
             args.load = args.pretrained_checkpoint
-            _ = load_checkpoint(model, None, None, strict=False)
+            _ = load_checkpoint_vit(model, None, None, strict=False)
             args.load = original_load
         elif args.pretrained_checkpoint_type == 'external':
             unwrap_model = utils.unwrap_model(model)

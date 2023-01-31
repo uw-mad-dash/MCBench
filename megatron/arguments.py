@@ -978,8 +978,8 @@ def _add_vision_args(parser):
                        help='Image height for vision classification task')
     group.add_argument('--img-w', type=int, default=224,
                        help='Image height for vision classification task')
-    group.add_argument('--num-channels', type=int, default=3,
-                       help='Number of channels in input image data')
+    # group.add_argument('--num-channels', type=int, default=3,
+    #                    help='Number of channels in input image data')
     group.add_argument('--patch-dim', type=int, default=16,
                        help='patch dimension')
     group.add_argument('--classes-fraction', type=float, default=1.0,
@@ -1004,6 +1004,20 @@ def _add_vision_args(parser):
     group.add_argument('--swin-backbone-type', type=str, default='tiny',
                        choices=['tiny', 'base', 'h3'],
                        help='pretraining objectives')
+
+    # load vit checkpoint and dataset from hugging face
+    group.add_argument('--dataset-name', type=str, default='cifar10',
+                       help='download dataset name from huggingface')
+    group.add_argument('--cache-dir', type=str, default='../hf_data/',
+                       help='download dataset name from huggingface')
+    group.add_argument('--train-val-split', type=float, default=0.15,
+                       help='train validation set split')
+    group.add_argument('--image-size', type=int, default=224,
+                       help='image size of ViTConfig')
+    group.add_argument('--patch-size', type=int, default=16,
+                       help='patch size of ViTConfig')
+    group.add_argument('--num-channels', type=int, default=3,
+                       help='num channels of ViTConfig')
     
     # inpainting arguments
     group.add_argument('--mask-type', type=str, default='random',

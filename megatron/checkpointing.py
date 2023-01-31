@@ -227,6 +227,180 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler):
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
 
+
+def _transpose_first_dim_vit(t, num_splits, num_splits_first, model):
+    input_shape = t.size()
+    # We use a self_attention module but the values extracted aren't
+    # specific to self attention so should work for cross attention as well
+    while hasattr(model, 'module'):
+        model = model.module
+    attention_module = model.backbone.transformer.layers[0].self_attention
+    hidden_size_per_attention_head = attention_module.hidden_size_per_attention_head
+    num_attention_heads_per_partition = attention_module.num_attention_heads_per_partition
+    if num_splits_first:
+        """[num_splits * np * hn, h]
+        -->(view) [num_splits, np, hn, h]
+        -->(tranpose) [np, num_splits, hn, h]
+        -->(view) [np * num_splits * hn, h] """
+
+        intermediate_shape = \
+            (num_splits, num_attention_heads_per_partition,
+             hidden_size_per_attention_head) + input_shape[1:]
+
+        t = t.view(*intermediate_shape)
+        t = t.transpose(0, 1).contiguous()
+    else:
+        """[np * hn * num_splits, h]
+        -->(view) [np, hn, num_splits, h]
+        -->(tranpose) [np, num_splits, hn, h]
+        -->(view) [np * num_splits * hn, h] """
+
+        intermediate_shape = \
+            (num_attention_heads_per_partition,
+             hidden_size_per_attention_head, num_splits) +\
+             input_shape[1:]
+
+        t = t.view(*intermediate_shape)
+        t = t.transpose(1, 2).contiguous()
+    t = t.view(*input_shape)
+
+    return t
+
+def fix_query_key_value_ordering_vit(model, checkpoint_version):
+    """Fix up query/key/value matrix ordering if checkpoint
+    version is smaller than 2.0
+    """
+    if checkpoint_version < 2.0:
+        if isinstance(model, list):
+            assert len(model)==1
+            model = model[0]
+        for name, param in model.named_parameters():
+            if name.endswith(('.query_key_value.weight', '.query_key_value.bias')):
+                if checkpoint_version == 0:
+                    fixed_param = _transpose_first_dim_vit(param.data, 3, True, model)
+                elif checkpoint_version == 1.0:
+                    fixed_param = _transpose_first_dim_vit(param.data, 3, False, model)
+                else:
+                    print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
+                    sys.exit()
+                param.data.copy_(fixed_param)
+            if name.endswith(('.key_value.weight', '.key_value.bias')):
+                if checkpoint_version == 0:
+                    fixed_param = _transpose_first_dim_vit(param.data, 2, True, model)
+                elif checkpoint_version == 1.0:
+                    fixed_param = _transpose_first_dim_vit(param.data, 2, False, model)
+                else:
+                    print_rank_0(f"Invalid checkpoint version {checkpoint_version}.")
+                    sys.exit()
+                param.data.copy_(fixed_param)
+        print_rank_0(" succesfully fixed query-key-values ordering for"
+                    " checkpoint version {}".format(checkpoint_version))
+
+
+def load_checkpoint_vit(model, optimizer, opt_param_scheduler, load_arg='load', strict=True):
+    """Load a model checkpoint and return the iteration.
+    strict (bool): whether to strictly enforce that the keys in
+        :attr:`state_dict` of the checkpoint match the names of
+        parameters and buffers in model.
+    """
+    args = get_args()
+    load_dir = getattr(args, load_arg)
+
+    model = utils.unwrap_model(model)
+
+    # Read the tracker file and set the iteration.
+    tracker_filename = get_checkpoint_tracker_filename(load_dir)
+
+    # If no tracker file, return iretation zero.
+    if not os.path.isfile(tracker_filename):
+        print_rank_0('WARNING: could not find the metadata file {} '.format(
+            tracker_filename))
+        print_rank_0('    will not load any checkpoints and will start from '
+                     'random')
+        return 0
+
+    # Otherwise, read the tracker file and either set the iteration or
+    # mark it as a release checkpoint.
+    iteration, release = read_metadata(tracker_filename)
+
+    # Checkpoint.
+    checkpoint_name = get_checkpoint_name(load_dir, iteration, release)
+    print_rank_0(f' loading checkpoint from {args.load} at iteration {iteration}')
+
+    # Load the checkpoint.
+    try:
+        state_dict = torch.load(checkpoint_name, map_location='cpu')
+    except ModuleNotFoundError:
+        from megatron.fp16_deprecated import loss_scaler
+        # For backward compatibility.
+        print_rank_0(' > deserializing using the old code structure ...')
+        sys.modules['fp16.loss_scaler'] = sys.modules[
+            'megatron.fp16_deprecated.loss_scaler']
+        sys.modules['megatron.fp16.loss_scaler'] = sys.modules[
+            'megatron.fp16_deprecated.loss_scaler']
+        state_dict = torch.load(checkpoint_name, map_location='cpu')
+        sys.modules.pop('fp16.loss_scaler', None)
+        sys.modules.pop('megatron.fp16.loss_scaler', None)
+    except BaseException as e:
+        print_rank_0('could not load the checkpoint')
+        print_rank_0(e)
+        sys.exit()
+
+    # set checkpoint version
+    set_checkpoint_version(state_dict.get('checkpoint_version', 0))
+
+    # Set iteration.
+    if args.finetune or release:
+        iteration = 0
+    else:
+        try:
+            iteration = state_dict['iteration']
+        except KeyError:
+            try:  # Backward compatible with older checkpoints
+                iteration = state_dict['total_iters']
+            except KeyError:
+                print_rank_0('A metadata file exists but unable to load '
+                             'iteration from checkpoint {}, exiting'.format(
+                                 checkpoint_name))
+                sys.exit()
+
+    # Check arguments.
+    assert args.consumed_train_samples == 0
+    assert args.consumed_valid_samples == 0
+    if 'args' in state_dict:
+        checkpoint_args = state_dict['args']
+        check_checkpoint_args(checkpoint_args)
+        args.consumed_train_samples = getattr(checkpoint_args,
+                                              'consumed_train_samples', 0)
+        update_num_microbatches(consumed_samples=args.consumed_train_samples)
+        args.consumed_valid_samples = getattr(checkpoint_args,
+                                              'consumed_valid_samples', 0)
+    else:
+        print_rank_0('could not find arguments in the checkpoint ...')
+
+    # Model.
+    if len(model) == 1:
+        model[0].load_state_dict(state_dict['model'], strict=strict)
+    else:
+        for i in range(len(model)):
+            mpu.set_virtual_pipeline_model_parallel_rank(i)
+            model[i].load_state_dict(state_dict['model%d' % i], strict=strict)
+
+    # Fix up query/key/value matrix ordering if needed
+    checkpoint_version = get_checkpoint_version()
+    print_rank_0(f' checkpoint version {checkpoint_version}')
+    fix_query_key_value_ordering_vit(model, checkpoint_version)
+
+    # Some utilities want to load a checkpoint without distributed being initialized
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+
+    print_rank_0(f'  successfully loaded checkpoint from {args.load} '
+                 f'at iteration {iteration}')
+
+    return iteration
+
+
 def _transpose_first_dim(t, num_splits, num_splits_first, model):
     input_shape = t.size()
     # We use a self_attention module but the values extracted aren't
