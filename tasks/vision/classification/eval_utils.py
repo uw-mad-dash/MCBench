@@ -92,12 +92,7 @@ def accuracy_func_provider_vit():
 
     def metrics_func(model, epoch):
         print_rank_0("calculating metrics ...")
-        correct, total = calculate_correct_answers(model, dataloader, epoch)
-        percent = float(correct) * 100.0 / float(total)
-        print_rank_last(
-            " >> |epoch: {}| overall: correct / total = {} / {} = "
-            "{:.4f} %".format(epoch, correct, total, percent)
-        )
+        calculate_correct_answers(model, dataloader, epoch)
 
     return metrics_func
 
@@ -144,9 +139,27 @@ def accuracy_func_provider():
 def calculate_correct_answers(model, dataloader, epoch):
     """Calculate correct over total answers"""
 
+    args = get_args()
     forward_backward_func = get_forward_backward_func()
     for m in model:
         m.eval()
+
+    saved_micro_batch_size = args.micro_batch_size
+    saved_global_batch_size = args.global_batch_size
+
+    ds = dataloader.dataset
+    if hasattr(ds, 'sample_multiplier'):
+        # If our dataset as a sample_multiplier attribute that means
+        # each "sample" from the dataset actually has multiple samples
+        # that will collapse into the batch dimension (for example in
+        # the RACE dataset that has several options), we need to
+        # account for that when setting the micro batch size.
+        sample_multiplier = ds.sample_multiplier
+    else:
+        sample_multiplier = 1
+
+    micro_batch_size_times_data_parallel = args.orig_micro_batch_size * args.data_parallel_size
+    num_micro_batches = args.orig_global_batch_size // micro_batch_size_times_data_parallel
 
     def loss_func(labels, output_tensor):
         logits = output_tensor
@@ -180,6 +193,11 @@ def calculate_correct_answers(model, dataloader, epoch):
         correct = 0
         for _, batch in enumerate(dataloader):
 
+            actual_batch_size = len(batch['labels'])
+            # ... applying sample_multiplier if necessary
+            args.micro_batch_size = actual_batch_size * sample_multiplier
+            args.global_batch_size = actual_batch_size * sample_multiplier * num_micro_batches
+
             loss_dicts = forward_backward_func(correct_answers_forward_step, batch, model,
                                                optimizer=None, timers=None, forward_only=True)
 
@@ -190,6 +208,9 @@ def calculate_correct_answers(model, dataloader, epoch):
     for m in model:
         m.train()
 
+    args.micro_batch_size = saved_micro_batch_size
+    args.global_batch_size = saved_global_batch_size
+
     # Reduce.
     if mpu.is_pipeline_last_stage():
         unreduced = torch.cuda.LongTensor([correct, total])
@@ -199,4 +220,8 @@ def calculate_correct_answers(model, dataloader, epoch):
         # Print on screen.
         correct_ans = unreduced[0].item()
         total_count = unreduced[1].item()
-        return correct_ans, total_count
+        percent = float(correct_ans) * 100.0 / float(total_count)
+        print_rank_last(
+            " >> |epoch: {}| overall: correct / total = {} / {} = "
+            "{:.4f} %".format(epoch, correct_ans, total_count, percent)
+        )

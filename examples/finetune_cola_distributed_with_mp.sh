@@ -2,7 +2,7 @@
 
 # compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
-WORLD_SIZE=1
+WORLD_SIZE=4
 
 DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --nnodes 1 \
@@ -13,13 +13,13 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
 TRAIN_DATA="../glue_data/CoLA/train.tsv"
 VALID_DATA="../glue_data/CoLA/dev.tsv"
 VOCAB_FILE="../bert-large-cased-vocab.txt"
-PRETRAINED_CHECKPOINT=checkpoints/bert_345m
+PRETRAINED_CHECKPOINT=checkpoints/bert_345m/split_2t_2p
 #PRETRAINED_CHECKPOINT=checkpoints/bert_345m
 CHECKPOINT_PATH=checkpoints/bert_345m_cola
 
 python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
-               --tensor-model-parallel-size 1 \
-               --pipeline-model-parallel-size 1 \
+               --tensor-model-parallel-size 2 \
+               --pipeline-model-parallel-size 2 \
                --task CoLA \
                --seed 1234 \
                --train-data $TRAIN_DATA \

@@ -92,14 +92,15 @@ def _build_train_valid_dataloaders(train_dataset, valid_dataset):
     print_rank_0('building train and validation dataloaders ...')
     # Training dataset.
     train_dataloader = build_data_loader(train_dataset, args.micro_batch_size,
-                                         args.num_workers, False, True)
+                                         args.num_workers, True, True)
     # Set the training iterations.
     args.train_iters_per_epoch = len(train_dataloader)
     args.train_iters = args.epochs * args.train_iters_per_epoch
     # Validation dataset. For this dataset, we do not need to set up
     # shuffling so we can just use a simple infinite loop.
     valid_dataloader_ = build_data_loader(valid_dataset, args.micro_batch_size,
-                                          args.num_workers, True,  False)
+                                         args.num_workers, False,  False)
+
     valid_dataloader = _build_infinite_size_dataloader(valid_dataloader_)
 
     # Now that we've built the data loaders, set batch_size arguments

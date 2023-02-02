@@ -18,6 +18,7 @@
 import math
 import torch
 import apex
+from megatron import mpu
 import torch.nn.functional as F
 import collections.abc
 from typing import Optional
@@ -336,8 +337,10 @@ class VitBackbone(MegatronModule):
 
         hidden_states = self.transformer(hidden_states, None)
 
-        if self.single_token_output:
-            hidden_states = hidden_states[:,0,:]
+        if (mpu.get_pipeline_model_parallel_rank() == mpu.get_pipeline_model_parallel_world_size() - 1 and
+            mpu.get_pipeline_model_parallel_world_size() > 1) or mpu.get_pipeline_model_parallel_world_size() == 1:
+            if self.single_token_output:
+                hidden_states = hidden_states[:,0,:]
 
         return hidden_states
 

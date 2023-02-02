@@ -221,7 +221,8 @@ class CoreAttention(MegatronModule):
         self.attention_dropout = torch.nn.Dropout(args.attention_dropout)
         self.num_attention_heads = args.num_attention_heads
         self.attention_head_size = int(args.hidden_size / args.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
+        self.tensor_parallel_size = mpu.get_tensor_model_parallel_world_size()
+        self.all_head_size = int(self.num_attention_heads * self.attention_head_size / self.tensor_parallel_size)
 
     def forward(self, query_layer, key_layer,
                 value_layer, attention_mask):
@@ -230,9 +231,9 @@ class CoreAttention(MegatronModule):
         # Raw attention scores. [b, np, s, s]
         # ===================================
 
-        query_layer = query_layer.permute(0, 2, 1, 3)
-        key_layer = key_layer.permute(0, 2, 1, 3)
-        value_layer = value_layer.permute(0, 2, 1, 3)
+        query_layer = query_layer.permute(0, 2, 1, 3).contiguous()
+        key_layer = key_layer.permute(0, 2, 1, 3).contiguous()
+        value_layer = value_layer.permute(0, 2, 1, 3).contiguous()
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
@@ -1364,6 +1365,7 @@ class ParallelTransformer(MegatronModule):
         self.post_process = post_process
         self.input_tensor = None
         self.drop_path_rate = drop_path_rate
+        self.is_vision_train = args.is_vision_train
 
         # Store activation checkpoiting flag.
         self.recompute_granularity = args.recompute_granularity
@@ -1593,22 +1595,47 @@ class ParallelTransformer(MegatronModule):
         #   likely redundant, since p2p_communication.py (likely originator)
         #   already creates viewless tensors. That said, make_viewless_tensor()
         #   is called here to be future-proof and corner-case-proof.
-        if isinstance(hidden_states, list):
-            hidden_states[0], hidden_states[1] = mpu.make_viewless_tensor(
-                hidden_states[0],
-                requires_grad=True,
-                keep_graph=True,
-            ), mpu.make_viewless_tensor(
-                hidden_states[1],
-                requires_grad=False,
-                keep_graph=True,
-            )
+        if self.is_vision_train:
+            if isinstance(hidden_states, list):
+                if len(hidden_states) == 1:
+                    hidden_states = mpu.make_viewless_tensor(
+                        hidden_states[0],
+                        requires_grad=True,
+                        keep_graph=True,
+                    )
+                elif len(hidden_states) == 2:
+                    hidden_states[0], hidden_states[1] = mpu.make_viewless_tensor(
+                        hidden_states[0],
+                        requires_grad=True,
+                        keep_graph=True,
+                    ), mpu.make_viewless_tensor(
+                        hidden_states[1],
+                        requires_grad=False,
+                        keep_graph=True,
+                    )
+            else:
+                hidden_states = mpu.make_viewless_tensor(
+                    hidden_states,
+                    requires_grad=True,
+                    keep_graph=True,
+                )
         else:
-            hidden_states = mpu.make_viewless_tensor(
-                hidden_states,
-                requires_grad=True,
-                keep_graph=True,
-            )
+            if isinstance(hidden_states, list):
+                hidden_states[0], hidden_states[1] = mpu.make_viewless_tensor(
+                    hidden_states[0],
+                    requires_grad=True,
+                    keep_graph=True,
+                ), mpu.make_viewless_tensor(
+                    hidden_states[1],
+                    requires_grad=False,
+                    keep_graph=True,
+                )
+            else:
+                hidden_states = mpu.make_viewless_tensor(
+                    hidden_states,
+                    requires_grad=True,
+                    keep_graph=True,
+                )
 
         if self.sequence_parallel:
             rng_context = mpu.get_cuda_rng_tracker().fork()

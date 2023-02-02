@@ -577,13 +577,16 @@ def train_step(forward_step_func, data_iterator,
         unwrapped_model = unwrap_model(
             unwrapped_model, (torchDDP, LocalDDP, Float16Module))
 
-        if unwrapped_model.share_word_embeddings:
-            word_embeddings_weight = unwrapped_model.word_embeddings_weight()
-            if args.DDP_impl == 'local':
-                grad = word_embeddings_weight.main_grad
-            else:
-                grad = word_embeddings_weight.grad
-            torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
+        if args.is_vision_train:
+            pass
+        else:
+            if unwrapped_model.share_word_embeddings:
+                word_embeddings_weight = unwrapped_model.word_embeddings_weight()
+                if args.DDP_impl == 'local':
+                    grad = word_embeddings_weight.main_grad
+                else:
+                    grad = word_embeddings_weight.grad
+                torch.distributed.all_reduce(grad, group=mpu.get_embedding_group())
 
     # All-reduce position_embeddings grad across first (encoder) and split (decoder) 
     # stages to ensure that position embeddings parameters stay in sync.

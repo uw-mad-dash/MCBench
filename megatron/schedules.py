@@ -532,10 +532,16 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
 
         if args.is_vision_train:
             if mpu.is_pipeline_stage_before_split(rank):
-                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
+                tensor_shapes.append((args.micro_batch_size,
+                                      int((args.image_size / args.patch_size) ** 2 + 1),
+                                      args.hidden_size))
             else:
-                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
-                tensor_shapes.append((args.micro_batch_size, args.hidden_size))
+                tensor_shapes.append((args.micro_batch_size,
+                                      int((args.image_size / args.patch_size) ** 2 + 1),
+                                      args.hidden_size))
+                tensor_shapes.append((args.micro_batch_size,
+                                      int((args.image_size / args.patch_size) ** 2 + 1),
+                                      args.hidden_size))
         else:
             if mpu.is_pipeline_stage_before_split(rank):
                 tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
@@ -544,7 +550,67 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                 tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     else:
         if args.is_vision_train:
-            tensor_shapes.append((args.micro_batch_size, args.hidden_size))
+            if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank:
+                if args.pipeline_compress_method == 'ae':
+                    tensor_shapes.append((args.micro_batch_size,
+                                          int((args.image_size / args.patch_size) ** 2 + 1),
+                                          args.pipeline_ae_dim))
+                elif args.pipeline_compress_method == "topk_int":
+                    if is_forward:
+                        tensor_shapes.append((args.pipeline_k))
+                        tensor_shapes.append((args.pipeline_k))
+                    else:
+                        tensor_shapes.append((args.pipeline_k))
+                elif args.pipeline_compress_method == "randk_int":
+                    if is_forward:
+                        tensor_shapes.append((args.pipeline_k))
+                        tensor_shapes.append((args.pipeline_k))
+                    else:
+                        tensor_shapes.append((args.pipeline_k))
+                elif args.pipeline_compress_method == 'topk':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'randk':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'topk_feedback':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'randk_feedback':
+                    tensor_shapes.append((args.pipeline_k, 4))
+                elif args.pipeline_compress_method == 'topk_old':
+                    tensor_shapes.append((2, args.pipeline_k))
+                elif args.pipeline_compress_method == 'randk_old':
+                    tensor_shapes.append((2, args.pipeline_k))
+                elif args.pipeline_compress_method == 'quantize':
+                    if is_forward:
+                        if args.pipeline_bits == 8:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  args.hidden_size))
+                        elif args.pipeline_bits == 4:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  int(args.hidden_size / 2)))
+                        elif args.pipeline_bits == 2:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  int(args.hidden_size / 4)))
+                        tensor_shapes.append((1, 1, args.hidden_size))
+                    else:
+                        tensor_shapes.append((args.micro_batch_size,
+                                              int((args.image_size / args.patch_size) ** 2 + 1),
+                                              args.hidden_size))
+                elif args.pipeline_compress_method == 'quantize_float':
+                    if args.pipeline_bits == 8:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 1, args.hidden_size))
+                    elif args.pipeline_bits == 4:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 2, int(args.hidden_size / 2)))
+                    elif args.pipeline_bits == 2:
+                        tensor_shapes.append((args.micro_batch_size * seq_length + 4, int(args.hidden_size / 4)))
+                else:
+                    tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
+            else:
+                tensor_shapes.append((args.micro_batch_size,
+                                      int((args.image_size / args.patch_size) ** 2 + 1),
+                                      args.hidden_size))
         else:
             # we can change the threshold for pipeline model parallel rank
             # to custom the number of compression
