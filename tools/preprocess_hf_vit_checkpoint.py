@@ -1,23 +1,40 @@
+import os
 import torch
+from transformers import ViTForImageClassification
 
-mg_path = "../examples/checkpoints/vision_classify/iter_0000001/mp_rank_00/model_optim_rng.pt"
-model_mg = torch.load(mg_path, map_location=torch.device('cpu'))
-print(type(model_mg))
-print(model_mg.keys())
-print(model_mg['model'].keys())
-# print(model_mg['model']['language_model']['embedding'])
-for key in model_mg['model'].keys():
-    if key.startswith("backbone.transformer.layers"):
-        if key.split(".")[3] == '0':
-            print("key", key, model_mg['model'][key].size())
-    else:
-        print("key", key, model_mg['model'][key].size())
+model_name = "vit_base_patch16"
+if model_name == "vit_base_patch16":
+    pretrain_name = "google/vit-base-patch16-224-in21k"
+    local_path = "../examples/checkpoints/vision_classify_base_patch16/release/mp_rank_00"
+elif model_name == "vit_base_patch32":
+    pretrain_name = "google/vit-base-patch32-224-in21k"
+    local_path = "../examples/checkpoints/vision_classify_base_patch32/release/mp_rank_00"
+elif model_name == "vit_large_patch16":
+    pretrain_name = "google/vit-large-patch16-224-in21k"
+    local_path = "../examples/checkpoints/vision_classify_large_patch16/release/mp_rank_00"
+elif model_name == "vit_large_patch32":
+    pretrain_name = "google/vit-large-patch32-224-in21k"
+    local_path = "../examples/checkpoints/vision_classify_large_patch32/release/mp_rank_00"
+elif model_name == "vit_huge_patch14":
+    pretrain_name = "google/vit-huge-patch14-224-in21k"
+    local_path = "../examples/checkpoints/vision_classify_huge_patch14/release/mp_rank_00"
+else:
+    raise ValueError("model name is wrong")
 
-# print(model_mg['model']['binary_head'].keys())
-# print(model_mg['iteration'])
-# print(model_mg['config'])
+vit_model = ViTForImageClassification.from_pretrained(pretrain_name)
+
+# print(vit_base_16.state_dict().keys())
+vit_model_state_dict = vit_model.state_dict()
+
+# for key in vit_model_state_dict.keys():
+#     print("key: ", key, " shape: ", vit_model_state_dict[key].size())
+
+if not os.path.exists(local_path):
+    os.makedirs(local_path)
 print("\033[31m ================================ \033[0m")
-hf_path = "../examples/checkpoints/vision_classify/release/mp_rank_00/vit_base_patch16_hf.pt"
+hf_path = os.path.join(local_path, model_name + "_hf.pt")
+torch.save(vit_model_state_dict, hf_path)
+# hf_path = "../examples/checkpoints/vision_classify_large_patch32/release/mp_rank_00/vit_large_patch32_hf.pt"
 model_hf = torch.load(hf_path, map_location=torch.device('cpu'))
 print(type(model_hf))
 print(model_hf.keys())
@@ -99,11 +116,12 @@ for key in model_hf.keys():
     elif "vit.layernorm.bias" in key:
         state_dict['model']['backbone.transformer.final_layernorm.bias'] = model_hf[key]
 
-
-torch.save(state_dict, "../examples/checkpoints/vision_classify/release/mp_rank_00/model_optim_rng.pt")
+save_path = os.path.join(local_path, "model_optim_rng.pt")
+torch.save(state_dict, save_path)
+# torch.save(state_dict, "../examples/checkpoints/vision_classify_large_patch32/release/mp_rank_00/model_optim_rng.pt")
 print("\033[31m ================================ \033[0m")
-model_check = torch.load("../examples/checkpoints/vision_classify/release/mp_rank_00/model_optim_rng.pt",
-                         map_location=torch.device('cpu'))
+
+model_check = torch.load(save_path, map_location=torch.device('cpu'))
 print(type(model_check))
 print(model_check.keys())
 print(model_check['model'].keys())

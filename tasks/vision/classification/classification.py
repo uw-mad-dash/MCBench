@@ -53,12 +53,25 @@ def classification():
             None,
             cache_dir=args.cache_dir,
             task="image-classification",
-            use_auth_token=False,
+            use_auth_token=True,
         )
 
         ### Here, we need to change the ImageProcessor for vit-base, vit-large and vit-huge
+        if args.pretrained_checkpoint.split("/")[1].endswith("base_patch16"):
+            pretrain_name = "google/vit-base-patch16-224-in21k"
+        elif args.pretrained_checkpoint.split("/")[1].endswith("base_patch32"):
+            pretrain_name = "google/vit-base-patch32-224-in21k"
+        elif args.pretrained_checkpoint.split("/")[1].endswith("large_patch16"):
+            pretrain_name = "google/vit-large-patch16-224-in21k"
+        elif args.pretrained_checkpoint.split("/")[1].endswith("large_patch32"):
+            pretrain_name = "google/vit-large-patch32-224-in21k"
+        elif args.pretrained_checkpoint.split("/")[1].endswith("huge_patch14"):
+            pretrain_name = "google/vit-huge-patch14-224-in21k"
+        else:
+            raise ValueError("pretrain_name is wrong!")
+
         image_processor = ViTImageProcessor.from_pretrained(
-            "google/vit-base-patch16-224-in21k",
+            pretrain_name,
             cache_dir=args.cache_dir,
             revision="main",
             use_auth_token=False,

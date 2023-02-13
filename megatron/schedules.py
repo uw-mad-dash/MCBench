@@ -549,6 +549,7 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                 tensor_shapes.append((decoder_seq_length, args.micro_batch_size, args.hidden_size))
                 tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     else:
+        org_size = args.micro_batch_size * int((args.image_size / args.patch_size) ** 2 + 1) * args.hidden_size
         if args.is_vision_train:
             if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank:
                 if args.pipeline_compress_method == 'ae':
@@ -556,17 +557,31 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                                           int((args.image_size / args.patch_size) ** 2 + 1),
                                           args.pipeline_ae_dim))
                 elif args.pipeline_compress_method == "topk_int":
-                    if is_forward:
-                        tensor_shapes.append((args.pipeline_k))
-                        tensor_shapes.append((args.pipeline_k))
+                    if org_size < args.pipeline_k:
+                        if is_forward:
+                            tensor_shapes.append((org_size))
+                            tensor_shapes.append((org_size))
+                        else:
+                            tensor_shapes.append((org_size))
                     else:
-                        tensor_shapes.append((args.pipeline_k))
+                        if is_forward:
+                            tensor_shapes.append((args.pipeline_k))
+                            tensor_shapes.append((args.pipeline_k))
+                        else:
+                            tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == "randk_int":
-                    if is_forward:
-                        tensor_shapes.append((args.pipeline_k))
-                        tensor_shapes.append((args.pipeline_k))
+                    if org_size < args.pipeline_k:
+                        if is_forward:
+                            tensor_shapes.append((org_size))
+                            tensor_shapes.append((org_size))
+                        else:
+                            tensor_shapes.append((org_size))
                     else:
-                        tensor_shapes.append((args.pipeline_k))
+                        if is_forward:
+                            tensor_shapes.append((args.pipeline_k))
+                            tensor_shapes.append((args.pipeline_k))
+                        else:
+                            tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
@@ -618,17 +633,31 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
                 elif args.pipeline_compress_method == "topk_int":
-                    if is_forward:
-                        tensor_shapes.append((args.pipeline_k))
-                        tensor_shapes.append((args.pipeline_k))
+                    if org_size < args.pipeline_k:
+                        if is_forward:
+                            tensor_shapes.append((org_size))
+                            tensor_shapes.append((org_size))
+                        else:
+                            tensor_shapes.append((org_size))
                     else:
-                        tensor_shapes.append((args.pipeline_k))
+                        if is_forward:
+                            tensor_shapes.append((args.pipeline_k))
+                            tensor_shapes.append((args.pipeline_k))
+                        else:
+                            tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == "randk_int":
-                    if is_forward:
-                        tensor_shapes.append((args.pipeline_k))
-                        tensor_shapes.append((args.pipeline_k))
+                    if org_size < args.pipeline_k:
+                        if is_forward:
+                            tensor_shapes.append((org_size))
+                            tensor_shapes.append((org_size))
+                        else:
+                            tensor_shapes.append((org_size))
                     else:
-                        tensor_shapes.append((args.pipeline_k))
+                        if is_forward:
+                            tensor_shapes.append((args.pipeline_k))
+                            tensor_shapes.append((args.pipeline_k))
+                        else:
+                            tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':

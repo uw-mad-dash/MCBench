@@ -708,8 +708,8 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         self.is_pipeline_compress = args.is_pipeline_compress
         self.pipeline_compress_method = args.pipeline_compress_method
         self.pipeline_ae_dim = args.pipeline_ae_dim
-        self.r = args.pipeline_qr_r
-        self.k = args.pipeline_k
+        self.pipeline_qr_r = args.pipeline_qr_r
+        self.pipeline_k = args.pipeline_k
 
         # Layernorm on the attention output
         self.post_attention_layernorm = LayerNorm(
@@ -868,14 +868,14 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             if self.pipeline_compress_method == 'ae':
                 output = F.linear(output, self.encoder)
             elif self.pipeline_compress_method == "topk_int":
-                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value, indices, _, _ = topk.encoder(output, k=self.pipeline_k)
                 output = [value, indices]
             elif self.pipeline_compress_method == "randk_int":
-                value, indices, _, _ = randk.encoder(output, k=self.k)
+                value, indices, _, _ = randk.encoder(output, k=self.pipeline_k)
                 output = [value, indices]
             elif self.pipeline_compress_method == 'topk':
                 batch_size = output.size()[1]
-                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
+                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.pipeline_k)
                 self.bool_matrix.zero_()
                 bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
                 bool_matrix = bool_matrix.reshape(-1, )
@@ -886,7 +886,7 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'randk':
                 batch_size = output.size()[1]
-                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.k)
+                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.pipeline_k)
                 self.bool_matrix.zero_()
                 bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
                 bool_matrix = bool_matrix.reshape(-1, )
@@ -896,19 +896,19 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 value = value.reshape(-1, 1)
                 output = torch.cat((loc, value), dim=1)
             elif self.pipeline_compress_method == 'topk_old':
-                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value, indices, _, _ = topk.encoder(output, k=self.pipeline_k)
                 value = value.to(torch.float32)
                 indices = indices.to(torch.float32)
                 output = torch.stack((value, indices), 0)
             elif self.pipeline_compress_method == 'randk_old':
-                value, indices, _, _ = topk.encoder(output, k=self.k)
+                value, indices, _, _ = topk.encoder(output, k=self.pipeline_k)
                 value = value.to(torch.float32)
                 indices = indices.to(torch.float32)
                 output = torch.stack((value, indices), 0)
             elif self.pipeline_compress_method == 'topk_feedback':
                 batch_size = output.size()[1]
                 output.data = output.data + self.error_feedback[:, :batch_size, :].data
-                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.k)
+                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.pipeline_k)
                 topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
                 topk_dense = topk_sparse.to_dense()
                 topk_res = torch.reshape(topk_dense, input_abs_size)
@@ -924,7 +924,7 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             elif self.pipeline_compress_method == 'randk_feedback':
                 batch_size = output.size()[1]
                 output.data = output.data + self.error_feedback[:, :batch_size, :].data
-                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.k)
+                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.pipeline_k)
                 topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
                 topk_dense = topk_sparse.to_dense()
                 topk_res = torch.reshape(topk_dense, input_abs_size)
@@ -953,7 +953,7 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 output = torch.cat((compress_output, S.T), 0)
             elif self.pipeline_compress_method == 'qr':
                 Q = torch.randn(args.hidden_size,
-                                self.r, dtype=torch.float16).cuda()
+                                self.pipeline_qr_r, dtype=torch.float16).cuda()
                 P = torch.matmul(output, Q)
                 P = P.to(torch.float32)
                 P = P.permute(1, 0, 2)

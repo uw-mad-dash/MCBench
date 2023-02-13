@@ -99,7 +99,7 @@ def _build_train_valid_dataloaders(train_dataset, valid_dataset):
     # Validation dataset. For this dataset, we do not need to set up
     # shuffling so we can just use a simple infinite loop.
     valid_dataloader_ = build_data_loader(valid_dataset, args.micro_batch_size,
-                                         args.num_workers, False,  False)
+                                          args.num_workers, True, False)
 
     valid_dataloader = _build_infinite_size_dataloader(valid_dataloader_)
 
