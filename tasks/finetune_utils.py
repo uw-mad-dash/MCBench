@@ -250,7 +250,11 @@ def _train(model, optimizer, opt_param_scheduler, forward_step,
 
         # Callback at the end of each epoch.
         if end_of_epoch_callback is not None:
+            if args.is_skip_compression_inference:
+                args.skip_compression = True
             end_of_epoch_callback(model, epoch)
+            if args.is_skip_compression_inference:
+                args.skip_compression = False
 
 
 def finetune(train_valid_datasets_provider, model_provider,

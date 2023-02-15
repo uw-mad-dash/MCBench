@@ -604,7 +604,8 @@ class RowParallelLinear(torch.nn.Module):
             else:
                 output_ = reduce_from_tensor_model_parallel_region(output_parallel)
         else:
-            if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer:
+            if self.is_tensor_compress and self.layer_number > self.start_tensor_compress_layer \
+                    and not args.skip_compression:
                 if self.tensor_compress_method == 'ae':
                     output_parallel = F.linear(output_parallel, self.encoder)
                     if self.sequence_parallel:

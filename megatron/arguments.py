@@ -402,6 +402,12 @@ def _add_inference_args(parser):
                        help='During inference, if batch-size times '
                        'sequence-length is smaller than this threshold '
                        'then we will not use pipelining, otherwise we will.')
+    group.add_argument('--is-skip-compression-inference',
+                       type=str2bool, default=False,
+                       help='Do we need to skip compression in inference')
+    group.add_argument('--skip-compression',
+                       type=str2bool, default=False,
+                       help='skip the compression part in the neural network')
 
     return parser
 

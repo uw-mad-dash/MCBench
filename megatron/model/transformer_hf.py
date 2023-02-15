@@ -863,8 +863,8 @@ class ParallelTransformerEncoderLayer(MegatronModule):
         #             bbox_inches='tight')
         # fig.clear()
 
-        if self.is_pipeline_compress:
-            args = get_args()
+        args = get_args()
+        if self.is_pipeline_compress and not args.skip_compression:
             if self.pipeline_compress_method == 'ae':
                 output = F.linear(output, self.encoder)
             elif self.pipeline_compress_method == "topk_int":
@@ -1113,8 +1113,8 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 encoder_output=None, enc_dec_attn_mask=None,
                 inference_params=None):
         # hidden_states: [s, b, h]
-        if self.is_pipeline_compress:
-            args = get_args()
+        args = get_args()
+        if self.is_pipeline_compress and not args.skip_compression:
             if self.pipeline_compress_method == 'ae':
                 hidden_states = F.linear(hidden_states, self.decoder)
             elif self.pipeline_compress_method == "topk_int":

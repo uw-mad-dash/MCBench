@@ -92,7 +92,11 @@ def accuracy_func_provider_vit():
 
     def metrics_func(model, epoch):
         print_rank_0("calculating metrics ...")
+        if args.is_skip_compression_inference:
+            args.skip_compression = True
         calculate_correct_answers(model, dataloader, epoch)
+        if args.is_skip_compression_inference:
+            args.skip_compression = False
 
     return metrics_func
 
