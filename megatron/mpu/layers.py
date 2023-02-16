@@ -625,12 +625,12 @@ class RowParallelLinear(torch.nn.Module):
                         if i == 0:
                             output_.data = topk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                         indices_res[i * self.k: (i + 1) * self.k],
-                                                        input_abs_size, input_abs_seq_size).data
+                                                        input_abs_size, input_abs_seq_size).detach()
                         else:
-                            output_.data = output_.data \
+                            output_.data = output_.detach() \
                                            + topk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                           indices_res[i * self.k: (i + 1) * self.k],
-                                                          input_abs_size, input_abs_seq_size).data
+                                                          input_abs_size, input_abs_seq_size).detach()
 
                 elif self.tensor_compress_method == "randk_int":
                     value, indices, input_abs_size, input_abs_seq_size = \
@@ -643,17 +643,17 @@ class RowParallelLinear(torch.nn.Module):
                         if i == 0:
                             output_.data = randk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                          indices_res[i * self.k: (i + 1) * self.k],
-                                                         input_abs_size, input_abs_seq_size).data
+                                                         input_abs_size, input_abs_seq_size).detach()
                         else:
-                            output_.data = output_.data \
+                            output_.data = output_.detach() \
                                            + randk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                            indices_res[i * self.k: (i + 1) * self.k],
-                                                           input_abs_size, input_abs_seq_size).data
+                                                           input_abs_size, input_abs_seq_size).detach()
 
                 elif self.tensor_compress_method == "quantize":
                     if args.tensor_bits == 8:
                         batch_size, seq_length, hidden_state = output_parallel.size()
-                        output_parallel.data, scale = quantize.compress_8bit(output_parallel.data)
+                        output_parallel.data, scale = quantize.compress_8bit(output_parallel.detach())
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
                         world_size = get_tensor_model_parallel_world_size()
@@ -662,17 +662,17 @@ class RowParallelLinear(torch.nn.Module):
                                 output_parallel.data = quantize.decompress_8bit(
                                     gather_res[:, :, i * hidden_state: (i + 1) * hidden_state],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                             else:
-                                output_parallel.data = output_parallel.data + quantize.decompress_8bit(
+                                output_parallel.data = output_parallel.detach() + quantize.decompress_8bit(
                                     gather_res[:, :, i * hidden_state: (i + 1) * hidden_state],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                         output_ = output_parallel
 
                     elif args.tensor_bits == 4:
                         batch_size, seq_length, hidden_state = output_parallel.size()
-                        output_parallel.data, scale = quantize.compress_4bit(output_parallel.data)
+                        output_parallel.data, scale = quantize.compress_4bit(output_parallel.detach())
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
                         world_size = get_tensor_model_parallel_world_size()
@@ -681,17 +681,17 @@ class RowParallelLinear(torch.nn.Module):
                                 output_parallel.data = quantize.decompress_4bit(
                                     gather_res[:, :, i * int(hidden_state / 2): (i + 1) * int(hidden_state / 2)],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                             else:
-                                output_parallel.data = output_parallel.data + quantize.decompress_4bit(
+                                output_parallel.data = output_parallel.detach() + quantize.decompress_4bit(
                                     gather_res[:, :, i * int(hidden_state / 2): (i + 1) * int(hidden_state / 2)],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                         output_ = output_parallel
 
                     elif args.tensor_bits == 2:
                         batch_size, seq_length, hidden_state = output_parallel.size()
-                        output_parallel.data, scale = quantize.compress_2bit(output_parallel.data)
+                        output_parallel.data, scale = quantize.compress_2bit(output_parallel.detach())
                         gather_res = gather_from_tensor_model_parallel_region(output_parallel)
                         scale_res = gather_from_tensor_model_parallel_region(scale)
                         world_size = get_tensor_model_parallel_world_size()
@@ -700,12 +700,12 @@ class RowParallelLinear(torch.nn.Module):
                                 output_parallel.data = quantize.decompress_2bit(
                                     gather_res[:, :, i * int(hidden_state / 4): (i + 1) * int(hidden_state / 4)],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                             else:
-                                output_parallel.data = output_parallel.data + quantize.decompress_2bit(
+                                output_parallel.data = output_parallel.detach() + quantize.decompress_2bit(
                                     gather_res[:, :, i * int(hidden_state / 4): (i + 1) * int(hidden_state / 4)],
                                     scale_res[:, :, i * hidden_state: (i + 1) * hidden_state]
-                                ).data
+                                ).detach()
                         output_ = output_parallel
 
                 elif self.tensor_compress_method == 'quantize_float':

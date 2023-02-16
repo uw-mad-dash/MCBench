@@ -974,11 +974,11 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 output = torch.cat((P_hat, Q), 1)
             elif self.pipeline_compress_method == "quantize":
                 if args.pipeline_bits == 8:
-                    output.data, scale = quantize.compress_8bit(output.data)
+                    output.data, scale = quantize.compress_8bit(output.detach())
                 elif args.pipeline_bits == 4:
-                    output.data, scale = quantize.compress_4bit(output.data)
+                    output.data, scale = quantize.compress_4bit(output.detach())
                 elif args.pipeline_bits == 2:
-                    output.data, scale = quantize.compress_2bit(output.data)
+                    output.data, scale = quantize.compress_2bit(output.detach())
                 else:
                     raise ValueError("pipeline bits is not correct")
                 output = [output, scale]
@@ -1201,11 +1201,11 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 hidden_states = hidden_states.permute(1, 0, 2)
             elif self.pipeline_compress_method == "quantize":
                 if args.pipeline_bits == 8:
-                    hidden_states[0].data = quantize.decompress_8bit(hidden_states[0].data, hidden_states[1]).data
+                    hidden_states[0].data = quantize.decompress_8bit(hidden_states[0].detach(), hidden_states[1])
                 elif args.pipeline_bits == 4:
-                    hidden_states[0].data = quantize.decompress_4bit(hidden_states[0].data, hidden_states[1]).data
+                    hidden_states[0].data = quantize.decompress_4bit(hidden_states[0].detach(), hidden_states[1])
                 elif args.pipeline_bits == 2:
-                    hidden_states[0].data = quantize.decompress_2bit(hidden_states[0].data, hidden_states[1]).data
+                    hidden_states[0].data = quantize.decompress_2bit(hidden_states[0].detach(), hidden_states[1])
                 else:
                     raise ValueError("pipeline bits is not correct")
                 hidden_states = hidden_states[0]
