@@ -8,7 +8,7 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --nnodes 1 \
                   --node_rank 0 \
                   --master_addr localhost \
-                  --master_port 6001"
+                  --master_port 6000"
 
 TRAIN_DATA="../glue_data/CoLA/train.tsv"
 VALID_DATA="../glue_data/CoLA/dev.tsv"
@@ -45,18 +45,18 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
                --layernorm-epsilon 1e-12 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-method ae \
-               --pipeline-ae-dim 50 \
-               --pipeline-qr-r 10 \
-               --pipeline-k 80000 \
+               --pipeline-compress-method power \
+               --pipeline-ae-dim 100 \
+               --pipeline-qr-r 100 \
+               --pipeline-k 200000 \
                --pipeline-m 50 \
                --pipeline-bits 8 \
                --start-pipeline-compress-rank 0 \
                --is-tensor-compress True \
-               --tensor-compress-method ae \
-               --tensor-ae-dim 50 \
-               --tensor-qr-r 10 \
-               --tensor-k 80000 \
+               --tensor-compress-method power \
+               --tensor-ae-dim 100 \
+               --tensor-qr-r 100 \
+               --tensor-k 200000 \
                --tensor-m 50 \
                --tensor-bits 8 \
                --start-tensor-compress-layer 6 \

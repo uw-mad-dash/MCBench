@@ -42,18 +42,18 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress False \
-               --pipeline-compress-method quantize \
+               --is-pipeline-compress True \
+               --pipeline-compress-method power \
                --pipeline-ae-dim 50 \
-               --pipeline-qr-r 10 \
+               --pipeline-qr-r 100 \
                --pipeline-k 100000 \
                --pipeline-m 50 \
                --pipeline-bits 2 \
                --start-pipeline-compress-rank 0 \
-               --is-tensor-compress False \
-               --tensor-compress-method quantize \
+               --is-tensor-compress True \
+               --tensor-compress-method power \
                --tensor-ae-dim 50 \
-               --tensor-qr-r 10 \
+               --tensor-qr-r 100 \
                --tensor-k 100000 \
                --tensor-m 50 \
                --tensor-bits 2 \

@@ -44,15 +44,15 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
                --layernorm-epsilon 1e-12 \
                --fp16 \
                --is-pipeline-compress True \
-               --pipeline-compress-method topk_int \
+               --pipeline-compress-method ef_power \
                --pipeline-ae-dim 50 \
                --pipeline-qr-r 10 \
                --pipeline-k 80000 \
                --pipeline-m 50 \
                --pipeline-bits 8 \
                --start-pipeline-compress-rank 0 \
-               --is-tensor-compress True \
-               --tensor-compress-method topk_int \
+               --is-tensor-compress False \
+               --tensor-compress-method power \
                --tensor-ae-dim 50 \
                --tensor-qr-r 10 \
                --tensor-k 80000 \
