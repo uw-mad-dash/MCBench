@@ -2,7 +2,7 @@ import os
 import torch
 from transformers import ViTForImageClassification
 
-model_name = "vit_base_patch16"
+model_name = "vit_base_patch32"
 if model_name == "vit_base_patch16":
     pretrain_name = "google/vit-base-patch16-224-in21k"
     local_path = "../examples/checkpoints/vision_classify_base_patch16/release/mp_rank_00"
