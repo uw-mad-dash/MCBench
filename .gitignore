@@ -30,3 +30,7 @@ megatron_lm_345m_v0.0.zip
 wikitext-103-v1.zip
 hf_data
 results
+glue_results
+vis_compression
+breakdown*
+vit_results

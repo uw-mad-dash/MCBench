@@ -229,3 +229,22 @@ def calculate_correct_answers(model, dataloader, epoch):
             " >> |epoch: {}| overall: correct / total = {} / {} = "
             "{:.4f} %".format(epoch, correct_ans, total_count, percent)
         )
+
+        if torch.distributed.is_initialized():
+            if torch.distributed.get_rank() == torch.distributed.get_world_size() - 1:
+                filename = "../vit_results/" + str(args.dataset_name) \
+                           + "_" + str(args.epochs) \
+                           + "_" + str(args.lr) \
+                           + "_" + str(args.lr_decay_style) \
+                           + "_" + str(args.num_layers) \
+                           + "_" + str(args.hidden_size) \
+                           + "_" + str(args.num_attention_heads) \
+                           + "_" + str(args.patch_size) \
+                           + "_" + str(args.is_pipeline_compress) \
+                           + "_" + str(args.pipeline_compress_method) \
+                           + "_" + str(args.pipeline_qr_r) \
+                           + "_" + str(args.is_tensor_compress) \
+                           + "_" + str(args.tensor_compress_method) \
+                           + "_" + str(args.tensor_qr_r) + ".txt"
+                with open(filename, 'a') as f:
+                    f.write(str(percent) + '\n')

@@ -549,8 +549,8 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                 tensor_shapes.append((decoder_seq_length, args.micro_batch_size, args.hidden_size))
                 tensor_shapes.append((seq_length, args.micro_batch_size, args.hidden_size))
     else:
-        org_size = args.micro_batch_size * int((args.image_size / args.patch_size) ** 2 + 1) * args.hidden_size
         if args.is_vision_train:
+            org_size = args.micro_batch_size * int((args.image_size / args.patch_size) ** 2 + 1) * args.hidden_size
             if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank and not args.skip_compression:
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((args.micro_batch_size,
@@ -582,6 +582,18 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                             tensor_shapes.append((args.pipeline_k))
                         else:
                             tensor_shapes.append((args.pipeline_k))
+                elif args.pipeline_compress_method == "power" or args.pipeline_compress_method == "ef_power":
+                    if is_forward:
+                        tensor_shapes.append((args.micro_batch_size,
+                                              int((args.image_size / args.patch_size) ** 2 + 1),
+                                              args.pipeline_qr_r))
+                        tensor_shapes.append((args.micro_batch_size,
+                                              args.hidden_size,
+                                              args.pipeline_qr_r))
+                    else:
+                        tensor_shapes.append((args.micro_batch_size,
+                                              int((args.image_size / args.patch_size) ** 2 + 1),
+                                              args.pipeline_qr_r))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
@@ -629,6 +641,7 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
         else:
             # we can change the threshold for pipeline model parallel rank
             # to custom the number of compression
+            org_size = args.micro_batch_size * seq_length * args.hidden_size
             if args.is_pipeline_compress and rank >= args.start_pipeline_compress_rank and not args.skip_compression:
                 if args.pipeline_compress_method == 'ae':
                     tensor_shapes.append((seq_length, args.micro_batch_size, args.pipeline_ae_dim))
@@ -658,6 +671,12 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                             tensor_shapes.append((args.pipeline_k))
                         else:
                             tensor_shapes.append((args.pipeline_k))
+                elif args.pipeline_compress_method == 'power' or args.pipeline_compress_method == 'ef_power':
+                    if is_forward:
+                        tensor_shapes.append((args.micro_batch_size, seq_length, args.pipeline_qr_r))
+                        tensor_shapes.append((args.micro_batch_size, args.hidden_size, args.pipeline_qr_r))
+                    else:
+                        tensor_shapes.append((args.micro_batch_size, seq_length, args.pipeline_qr_r))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
@@ -720,23 +739,44 @@ def recv_forward(tensor_shapes, timers):
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
                 elif args.pipeline_compress_method == 'topk_int':
-                    if flag:
-                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                            timers=timers))
-                        flag = False
+                    if len(tensor_shapes) > 1:
+                        if flag:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers))
+                            flag = False
+                        else:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers,
+                                                                                dtype_=torch.int64))
                     else:
                         input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                            timers=timers,
-                                                                            dtype_=torch.int64))
+                                                                            timers=timers))
                 elif args.pipeline_compress_method == 'randk_int':
-                    if flag:
-                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                            timers=timers))
-                        flag = False
+                    if len(tensor_shapes) > 1:
+                        if flag:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers))
+                            flag = False
+                        else:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers,
+                                                                                dtype_=torch.int64))
                     else:
                         input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                            timers=timers,
-                                                                            dtype_=torch.int64))
+                                                                            timers=timers))
+                elif args.pipeline_compress_method == 'power' or args.pipeline_compress_method == 'ef_power':
+                    if len(tensor_shapes) > 1:
+                        if flag:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers))
+                            flag = False
+                        else:
+                            input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                                timers=timers,
+                                                                                dtype_=torch.float16))
+                    else:
+                        input_tensors.append(p2p_communication.recv_forward(tensor_shape,
+                                                                            timers=timers))
                 elif args.pipeline_compress_method == 'topk_feedback':
                     input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                         timers=timers))
@@ -752,7 +792,7 @@ def recv_forward(tensor_shapes, timers):
                                                                         timers=timers,
                                                                         dtype_=torch.float32))
                 elif args.pipeline_compress_method == 'quantize':
-                    if len(tensor_shapes) != 1:
+                    if len(tensor_shapes) > 1:
                         # since dtype_ is uint8 here
                         # if length of tensor_shapes is 1
                         # the dtype of tensor is float16 or float32.
@@ -763,7 +803,8 @@ def recv_forward(tensor_shapes, timers):
                             flag = False
                         else:
                             input_tensors.append(p2p_communication.recv_forward(tensor_shape,
-                                                                                timers=timers))
+                                                                                timers=timers,
+                                                                                dtype_=torch.float16))
                     else:
                         input_tensors.append(p2p_communication.recv_forward(tensor_shape,
                                                                             timers=timers))
@@ -802,10 +843,40 @@ def send_forward(output_tensors, tensor_shapes, timers):
     if isinstance(output_tensors[0], list):
         if len(output_tensors[0]) > 1:
             output_tensors = output_tensors[0]
-    for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
-        if tensor_shape is None:
-            continue
-        p2p_communication.send_forward(output_tensor, tensor_shape, timers=timers)
+
+    args = get_args()
+    if args.pipeline_compress_method == "topk_int" or args.pipeline_compress_method == "randk_int":
+        if len(output_tensors) > 1:
+            p2p_communication.send_forward(output_tensors[0], tensor_shapes[0], timers=timers)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.int64)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    continue
+                p2p_communication.send_forward(output_tensor, tensor_shape, timers=timers)
+    elif args.pipeline_compress_method == 'power' or args.pipeline_compress_method == 'ef_power':
+        if len(output_tensors) > 1:
+            p2p_communication.send_forward(output_tensors[0], tensor_shapes[0], timers=timers)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.float16)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    continue
+                p2p_communication.send_forward(output_tensor, tensor_shape, timers=timers)
+    elif args.pipeline_compress_method == 'quantize':
+        if len(output_tensors) > 1:
+            p2p_communication.send_forward(output_tensors[0], tensor_shapes[0], timers=timers)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.float16)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    continue
+                p2p_communication.send_forward(output_tensor, tensor_shape, timers=timers)
+    else:
+        for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+            if tensor_shape is None:
+                continue
+            p2p_communication.send_forward(output_tensor, tensor_shape, timers=timers)
 
 
 def send_backward(input_tensor_grads, tensor_shapes, timers):
@@ -835,7 +906,25 @@ def send_forward_recv_backward(output_tensors, tensor_shapes, timers):
                 output_tensor_grad = p2p_communication.send_forward_recv_backward(
                     output_tensor, tensor_shape, timers=timers)
                 output_tensor_grads.append(output_tensor_grad)
-            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.int64)
+        else:
+            for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+    elif args.pipeline_compress_method == 'power' or args.pipeline_compress_method == 'ef_power':
+        if len(output_tensors) > 1:
+            for (output_tensor, tensor_shape) in zip([output_tensors[0]], [tensor_shapes[0]]):
+                if tensor_shape is None:
+                    output_tensor_grads.append(None)
+                    continue
+                output_tensor_grad = p2p_communication.send_forward_recv_backward(
+                    output_tensor, tensor_shape, timers=timers)
+                output_tensor_grads.append(output_tensor_grad)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.float16)
         else:
             for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
                 if tensor_shape is None:
@@ -861,7 +950,7 @@ def send_forward_recv_backward(output_tensors, tensor_shapes, timers):
                 output_tensor_grad = p2p_communication.send_forward_recv_backward(
                         output_tensor, tensor_shape, timers=timers)
                 output_tensor_grads.append(output_tensor_grad)
-            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers)
+            p2p_communication.send_forward(output_tensors[1], tensor_shapes[1], timers=timers, dtype_=torch.float16)
         else:
             for (output_tensor, tensor_shape) in zip(output_tensors, tensor_shapes):
                 if tensor_shape is None:
@@ -907,6 +996,26 @@ def send_backward_recv_forward(input_tensor_grads, tensor_shapes, timers):
                 input_tensor = p2p_communication.send_backward_recv_forward(
                     input_tensor_grad, tensor_shape, timers=timers)
                 input_tensors.append(input_tensor)
+    elif args.pipeline_compress_method == 'power' or args.pipeline_compress_method == 'ef_power':
+        if len(tensor_shapes) > 1:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, [tensor_shapes[0]]):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                        input_tensor_grad, tensor_shape, timers=timers)
+                input_tensors.append(input_tensor)
+            input_tensors.append(p2p_communication.recv_forward(tensor_shapes[1],
+                                                                timers=timers,
+                                                                dtype_=torch.float16))
+        else:
+            for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
+                if tensor_shape is None:
+                    input_tensors.append(None)
+                    continue
+                input_tensor = p2p_communication.send_backward_recv_forward(
+                    input_tensor_grad, tensor_shape, timers=timers)
+                input_tensors.append(input_tensor)
     elif args.pipeline_compress_method == 'quantize':
         if len(tensor_shapes) > 1:
             for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, [tensor_shapes[0]]):
@@ -917,7 +1026,8 @@ def send_backward_recv_forward(input_tensor_grads, tensor_shapes, timers):
                         input_tensor_grad, tensor_shape, timers=timers, dtype_=torch.uint8)
                 input_tensors.append(input_tensor)
             input_tensors.append(p2p_communication.recv_forward(tensor_shapes[1],
-                                                                timers=timers))
+                                                                timers=timers,
+                                                                dtype_=torch.float16))
         else:
             for (input_tensor_grad, tensor_shape) in zip(input_tensor_grads, tensor_shapes):
                 if tensor_shape is None:

@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from scipy.linalg import hadamard
 from torch import nn
 from torch.nn.parameter import Parameter
+from queue import Queue
 
 from megatron import get_timers, get_args, get_global_memory_buffer
 from megatron import mpu
@@ -732,6 +733,30 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                         torch.empty(args.pipeline_ae_dim, args.hidden_size,
                                     dtype=args.params_dtype)
                     ))
+                elif self.pipeline_compress_method == 'power':
+                    self.generator = torch.Generator().manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            dtype=args.params_dtype
+                        )
+                    )
+                elif self.pipeline_compress_method == 'ef_power':
+                    self.generator = torch.Generator().manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            dtype=args.params_dtype
+                        )
+                    )
+                    self.error_feedback = torch.zeros(
+                        args.seq_length, args.micro_batch_size, args.hidden_size,
+                        dtype=args.params_dtype
+                    )
                 elif self.pipeline_compress_method == 'topk':
                     self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
                                                    dtype=torch.int64)
@@ -758,6 +783,33 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                         torch.empty(args.pipeline_ae_dim, args.hidden_size,
                                     device=torch.cuda.current_device(), dtype=args.params_dtype)
                     ))
+                elif self.pipeline_compress_method == 'power':
+                    self.generator = torch.Generator(device=torch.cuda.current_device()).manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            device=torch.cuda.current_device(),
+                            dtype=torch.float64
+                        )
+                    )
+                elif self.pipeline_compress_method == 'ef_power':
+                    self.generator = torch.Generator(device=torch.cuda.current_device()).manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            device=torch.cuda.current_device(),
+                            dtype=torch.float64
+                        )
+                    )
+                    self.error_feedback = torch.zeros(
+                        args.seq_length, args.micro_batch_size, args.hidden_size,
+                        device=torch.cuda.current_device(),
+                        dtype=torch.float64
+                    )
                 elif self.pipeline_compress_method == 'topk':
                     self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
                                                    device=torch.cuda.current_device(),
@@ -884,6 +936,41 @@ class ParallelTransformerEncoderLayer(MegatronModule):
             elif self.pipeline_compress_method == "randk_int":
                 value, indices, _, _ = randk.encoder(output, k=self.pipeline_k)
                 output = [value, indices]
+            elif self.pipeline_compress_method == "power":
+                hidden_states = hidden_states.permute([1, 0, 2])
+                q_prev = self.q_queue.get()
+                hidden_states = hidden_states.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                p = torch.bmm(hidden_states.permute([1, 0, 2]), q_prev[:args.micro_batch_size, :, :])
+                p_hat = torch.linalg.qr(p).Q
+                q_next = torch.bmm(hidden_states.permute([1, 2, 0]), p_hat).detach()
+                if q_next.size()[0] == q_prev.size()[0]:
+                    self.q_queue.put(q_next)
+                else:
+                    self.q_queue.put(q_prev)
+                p_hat = p_hat.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+                q_next = q_next.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+                output = [p_hat, q_next]
+            elif self.pipeline_compress_method == "ef_power":
+                hidden_states = hidden_states.permute([1, 0, 2])
+                q_prev = self.q_queue.get()
+                hidden_states = hidden_states.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                hidden_states_last = hidden_states.clone()
+                if hidden_states.size()[1] == self.error_feedback.size()[1]:
+                    hidden_states = hidden_states + self.error_feedback
+                p = torch.bmm(hidden_states.permute([1, 0, 2]), q_prev[:args.micro_batch_size, :, :])
+                p_hat = torch.linalg.qr(p).Q
+                q_next = torch.bmm(hidden_states.permute([1, 2, 0]), p_hat).detach()
+                if q_next.size()[0] == q_prev.size()[0]:
+                    self.q_queue.put(q_next)
+                else:
+                    self.q_queue.put(q_prev)
+                decompose_matrix = torch.bmm(p_hat, q_next.permute([0, 2, 1]))
+                decompose_matrix = decompose_matrix.permute([1, 0, 2])
+                if decompose_matrix.size()[1] == hidden_states_last.size()[1]:
+                    self.error_feedback = hidden_states_last.detach() - decompose_matrix.detach()
+                p_hat = p_hat.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+                q_next = q_next.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+                output = [p_hat, q_next]
             elif self.pipeline_compress_method == 'topk':
                 batch_size = output.size()[1]
                 value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.pipeline_k)
@@ -1145,6 +1232,18 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                                                  (int(args.image_size / args.patch_size) ** 2 + 1) *
                                                  args.hidden_size])
                 hidden_states = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
+            elif self.pipeline_compress_method == "power":
+                p_hat, q = hidden_states[0], hidden_states[1]
+                p_hat = p_hat.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                q = q.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                hidden_states = torch.bmm(p_hat, q.permute([0, 2, 1]))
+                hidden_states = hidden_states.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+            elif self.pipeline_compress_method == "ef_power":
+                p_hat, q = hidden_states[0], hidden_states[1]
+                p_hat = p_hat.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                q = q.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                hidden_states = torch.bmm(p_hat, q.permute([0, 2, 1]))
+                hidden_states = hidden_states.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
             elif self.pipeline_compress_method == 'topk':
                 input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
                 loc = hidden_states[:, :3]

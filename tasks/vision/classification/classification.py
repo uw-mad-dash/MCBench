@@ -50,7 +50,6 @@ def classification():
         )
         dataset = load_dataset(
             args.dataset_name,
-            None,
             cache_dir=args.cache_dir,
             task="image-classification",
             use_auth_token=True,

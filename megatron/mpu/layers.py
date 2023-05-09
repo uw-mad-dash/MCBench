@@ -26,6 +26,7 @@ import time
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
+from queue import Queue
 from scipy.linalg import hadamard
 from torch.nn.parameter import Parameter
 
@@ -502,6 +503,30 @@ class RowParallelLinear(torch.nn.Module):
                         torch.empty(self.output_size, args.tensor_ae_dim,
                                     dtype=args.params_dtype))
                     )
+                elif self.tensor_compress_method == 'power':
+                    self.generator = torch.Generator().manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            dtype=args.params_dtype
+                        )
+                    )
+                elif self.tensor_compress_method == 'ef_power':
+                    self.generator = torch.Generator().manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            dtype=args.params_dtype
+                        )
+                    )
+                    self.error_feedback = torch.zeros(
+                        args.seq_length, args.micro_batch_size, args.hidden_size,
+                        dtype=args.params_dtype
+                    )
                 elif self.tensor_compress_method == 'topk':
                     self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size,
                                                    args.hidden_size, dtype=torch.int64)
@@ -539,6 +564,33 @@ class RowParallelLinear(torch.nn.Module):
                         torch.empty(self.output_size, args.tensor_ae_dim,
                                     device=torch.cuda.current_device(), dtype=args.params_dtype)
                     ))
+                elif self.tensor_compress_method == 'power':
+                    self.generator = torch.Generator(device=torch.cuda.current_device()).manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            device=torch.cuda.current_device(),
+                            dtype=torch.float64
+                        )
+                    )
+                elif self.tensor_compress_method == 'ef_power':
+                    self.generator = torch.Generator(device=torch.cuda.current_device()).manual_seed(0)
+                    self.q_queue = Queue()
+                    self.q_queue.put(
+                        torch.randn(
+                            [args.micro_batch_size, args.hidden_size, args.pipeline_qr_r],
+                            generator=self.generator,
+                            device=torch.cuda.current_device(),
+                            dtype=torch.float64
+                        )
+                    )
+                    self.error_feedback = torch.zeros(
+                        args.seq_length, args.micro_batch_size, args.hidden_size,
+                        device=torch.cuda.current_device(),
+                        dtype=torch.float64
+                    )
                 elif self.tensor_compress_method == 'topk':
                     self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
                                                    device=torch.cuda.current_device(),
@@ -649,6 +701,79 @@ class RowParallelLinear(torch.nn.Module):
                                            + randk.decoder(value_res[i * self.k: (i + 1) * self.k],
                                                            indices_res[i * self.k: (i + 1) * self.k],
                                                            input_abs_size, input_abs_seq_size).detach()
+
+                elif self.tensor_compress_method == "power":
+                    q_prev = self.q_queue.get()
+                    if args.is_vision_train:
+                        output_parallel = output_parallel.permute([1, 0, 2])
+                    output_parallel = output_parallel.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                    p = torch.bmm(output_parallel.permute([1, 0, 2]), q_prev[:args.micro_batch_size, :, :])
+                    if self.sequence_parallel:
+                        p_all_reduce = reduce_scatter_to_sequence_parallel_region(p)
+                    else:
+                        p_all_reduce = reduce_from_tensor_model_parallel_region(p)
+                    p_all_reduce_mean = p_all_reduce / get_tensor_model_parallel_world_size()
+                    p_hat = torch.linalg.qr(p_all_reduce_mean).Q
+                    q_next = torch.bmm(output_parallel.permute([1, 2, 0]), p_hat).detach()
+                    if q_next.size()[0] == q_prev.size()[0]:
+                        if self.sequence_parallel:
+                            q_next_all_reduce = reduce_scatter_to_sequence_parallel_region(q_next).detach()
+                        else:
+                            q_next_all_reduce = reduce_from_tensor_model_parallel_region(q_next).detach()
+                        q_next_all_reduce_mean = q_next_all_reduce / get_tensor_model_parallel_world_size()
+                        self.q_queue.put(q_next_all_reduce_mean)
+                    else:
+                        if self.sequence_parallel:
+                            q_next_all_reduce = reduce_scatter_to_sequence_parallel_region(q_next).detach()
+                        else:
+                            q_next_all_reduce = reduce_from_tensor_model_parallel_region(q_next).detach()
+                        q_next_all_reduce_mean = q_next_all_reduce / get_tensor_model_parallel_world_size()
+                        self.q_queue.put(q_prev)
+                    output_ = torch.bmm(p_hat, q_next_all_reduce_mean.permute([0, 2, 1]))
+                    if args.is_vision_train:
+                        pass
+                    else:
+                        output_ = output_.permute([1, 0, 2])
+                    output_ = output_.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
+
+                elif self.tensor_compress_method == "ef_power":
+                    q_prev = self.q_queue.get()
+                    if args.is_vision_train:
+                        output_parallel = output_parallel.permute([1, 0, 2])
+                    output_parallel = output_parallel.to(dtype=torch.float64, memory_format=torch.contiguous_format)
+                    output_parallel_last = output_parallel.clone()
+                    if output_parallel.size()[1] == self.error_feedback.size()[1]:
+                        output_parallel = output_parallel + self.error_feedback
+                    p = torch.bmm(output_parallel.permute([1, 0, 2]), q_prev[:args.micro_batch_size, :, :])
+                    if self.sequence_parallel:
+                        p_all_reduce = reduce_scatter_to_sequence_parallel_region(p)
+                    else:
+                        p_all_reduce = reduce_from_tensor_model_parallel_region(p)
+                    p_all_reduce_mean = p_all_reduce / get_tensor_model_parallel_world_size()
+                    p_hat = torch.linalg.qr(p_all_reduce_mean).Q
+                    q_next = torch.bmm(output_parallel.permute([1, 2, 0]), p_hat).detach()
+                    if q_next.size()[0] == q_prev.size()[0]:
+                        if self.sequence_parallel:
+                            q_next_all_reduce = reduce_scatter_to_sequence_parallel_region(q_next).detach()
+                        else:
+                            q_next_all_reduce = reduce_from_tensor_model_parallel_region(q_next).detach()
+                        q_next_all_reduce_mean = q_next_all_reduce / get_tensor_model_parallel_world_size()
+                        self.q_queue.put(q_next_all_reduce_mean)
+                    else:
+                        if self.sequence_parallel:
+                            q_next_all_reduce = reduce_scatter_to_sequence_parallel_region(q_next).detach()
+                        else:
+                            q_next_all_reduce = reduce_from_tensor_model_parallel_region(q_next).detach()
+                        q_next_all_reduce_mean = q_next_all_reduce / get_tensor_model_parallel_world_size()
+                        self.q_queue.put(q_prev)
+                    output_ = torch.bmm(p_hat, q_next_all_reduce_mean.permute([0, 2, 1]))
+                    if args.is_vision_train:
+                        pass
+                    else:
+                        output_ = output_.permute([1, 0, 2])
+                    if output_.size()[1] == self.error_feedback.size()[1]:
+                        self.error_feedback = output_parallel_last.detach() - output_.detach()
+                    output_ = output_.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
 
                 elif self.tensor_compress_method == "quantize":
                     if args.tensor_bits == 8:
