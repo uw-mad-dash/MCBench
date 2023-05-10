@@ -34,3 +34,5 @@ glue_results
 vis_compression
 breakdown*
 vit_results
+powersgd_logs
+powersgd_logs_local

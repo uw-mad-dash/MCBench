@@ -584,16 +584,30 @@ def get_tensor_shapes(rank, model_type, is_forward=True):
                             tensor_shapes.append((args.pipeline_k))
                 elif args.pipeline_compress_method == "power" or args.pipeline_compress_method == "ef_power":
                     if is_forward:
-                        tensor_shapes.append((args.micro_batch_size,
-                                              int((args.image_size / args.patch_size) ** 2 + 1),
-                                              args.pipeline_qr_r))
-                        tensor_shapes.append((args.micro_batch_size,
-                                              args.hidden_size,
-                                              args.pipeline_qr_r))
+                        if int((args.image_size / args.patch_size) ** 2 + 1) >= args.pipeline_qr_r:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  args.pipeline_qr_r))
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  args.hidden_size,
+                                                  args.pipeline_qr_r))
+                        else:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  int((args.image_size / args.patch_size) ** 2 + 1)))
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  args.hidden_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1)))
+
                     else:
-                        tensor_shapes.append((args.micro_batch_size,
-                                              int((args.image_size / args.patch_size) ** 2 + 1),
-                                              args.pipeline_qr_r))
+                        if int((args.image_size / args.patch_size) ** 2 + 1) >= args.pipeline_qr_r:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  args.pipeline_qr_r))
+                        else:
+                            tensor_shapes.append((args.micro_batch_size,
+                                                  int((args.image_size / args.patch_size) ** 2 + 1),
+                                                  int((args.image_size / args.patch_size) ** 2 + 1)))
                 elif args.pipeline_compress_method == 'topk':
                     tensor_shapes.append((args.pipeline_k, 4))
                 elif args.pipeline_compress_method == 'randk':
