@@ -77,29 +77,6 @@ def accuracy_func_provider(single_dataset_provider):
             print(' >> |epoch: {}| overall: correct / total = {} / {} = '
                   '{:.4f} %'.format(epoch, correct, total, percent))
 
-            if torch.distributed.is_initialized():
-                if torch.distributed.get_rank() == torch.distributed.get_world_size() - 1:
-                    filename = "../glue_results/" + str(args.task) \
-                               + "_" + str(args.epochs) \
-                               + "_" + str(args.lr) \
-                               + "_" + str(args.num_layers) \
-                               + "_" + str(args.hidden_size) \
-                               + "_" + str(args.num_attention_heads) \
-                               + "_" + str(args.is_pipeline_compress) \
-                               + "_" + str(args.pipeline_compress_method) \
-                               + "_" + str(args.pipeline_ae_dim) \
-                               + "_" + str(args.pipeline_k) \
-                               + "_" + str(args.pipeline_qr_r) \
-                               + "_" + str(args.pipeline_bits) \
-                               + "_" + str(args.is_tensor_compress) \
-                               + "_" + str(args.tensor_compress_method) \
-                               + "_" + str(args.tensor_ae_dim) \
-                               + "_" + str(args.tensor_k) \
-                               + "_" + str(args.tensor_qr_r) \
-                               + "_" + str(args.tensor_bits) + ".txt"
-                    with open(filename, 'a') as f:
-                        f.write("correct / total: " + str(percent) + '\n')
-
         if output_predictions and is_last_rank():
             assert args.load is not None
             filename = os.path.join(args.load, names + '.pt')
@@ -219,29 +196,6 @@ def calculate_correct_answers(name, model, dataloader,
                         '= {} / {} = {:.4f} %, elapsed time (sec): {:.3f}'.format(
                             epoch, name, correct_ans, total_count,
                             percent, elapsed_time))
-
-        if torch.distributed.is_initialized():
-            if torch.distributed.get_rank() == torch.distributed.get_world_size() - 1:
-                filename = "../glue_results/" + str(args.task) \
-                           + "_" + str(args.epochs) \
-                           + "_" + str(args.lr) \
-                           + "_" + str(args.num_layers) \
-                           + "_" + str(args.hidden_size) \
-                           + "_" + str(args.num_attention_heads) \
-                           + "_" + str(args.is_pipeline_compress) \
-                           + "_" + str(args.pipeline_compress_method) \
-                           + "_" + str(args.pipeline_ae_dim) \
-                           + "_" + str(args.pipeline_k) \
-                           + "_" + str(args.pipeline_qr_r) \
-                           + "_" + str(args.pipeline_bits) \
-                           + "_" + str(args.is_tensor_compress) \
-                           + "_" + str(args.tensor_compress_method) \
-                           + "_" + str(args.tensor_ae_dim) \
-                           + "_" + str(args.tensor_k) \
-                           + "_" + str(args.tensor_qr_r) \
-                           + "_" + str(args.tensor_bits) + ".txt"
-                with open(filename, 'a') as f:
-                    f.write("metrics for {}: correct / total: ".format(name) + str(percent) + '\n')
 
         if output_predictions:
             return correct_ans, total_count, (softmaxes, labels, ids)
@@ -390,29 +344,6 @@ def calculate_correlation_coefficient(name, model, dataloader,
                                 'elapsed time (sec): {:.3f}'.format(epoch, name, corr, elapsed_time))
             else:
                 raise ValueError("the input type is error")
-
-            if torch.distributed.is_initialized():
-                if torch.distributed.get_rank() == torch.distributed.get_world_size() - 1:
-                    filename = "../glue_results/" + str(args.task) \
-                               + "_" + str(args.epochs) \
-                               + "_" + str(args.lr) \
-                               + "_" + str(args.num_layers) \
-                               + "_" + str(args.hidden_size) \
-                               + "_" + str(args.num_attention_heads) \
-                               + "_" + str(args.is_pipeline_compress) \
-                               + "_" + str(args.pipeline_compress_method) \
-                               + "_" + str(args.pipeline_ae_dim) \
-                               + "_" + str(args.pipeline_k) \
-                               + "_" + str(args.pipeline_qr_r) \
-                               + "_" + str(args.pipeline_bits) \
-                               + "_" + str(args.is_tensor_compress) \
-                               + "_" + str(args.tensor_compress_method) \
-                               + "_" + str(args.tensor_ae_dim) \
-                               + "_" + str(args.tensor_k) \
-                               + "_" + str(args.tensor_qr_r) \
-                               + "_" + str(args.tensor_bits) + ".txt"
-                    with open(filename, 'a') as f:
-                        f.write(tp + ": " + str(corr) + '\n')
 
         return corr
     return 0.
