@@ -3,7 +3,7 @@
 # compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
 
 GPUS_PER_NODE=4
-MASTER_ADDR=3.143.18.40
+MASTER_ADDR=18.117.169.202
 MASTER_PORT=6000
 NNODES=4
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
@@ -20,8 +20,8 @@ CHECKPOINT_PATH=checkpoints/bert_pretrain_distributed
 
 python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_bert.py \
-       --tensor-model-parallel-size 8 \
-       --pipeline-model-parallel-size 2 \
+       --tensor-model-parallel-size 4 \
+       --pipeline-model-parallel-size 4 \
        --num-layers 24 \
        --hidden-size 1024 \
        --num-attention-heads 16 \
@@ -50,17 +50,17 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --eval-iters 100 \
        --fp16 \
        --is-pipeline-compress True \
-       --pipeline-compress-method randk_int \
+       --pipeline-compress-method power \
        --pipeline-ae-dim 100 \
-       --pipeline-qr-r 10 \
+       --pipeline-qr-r 100 \
        --pipeline-k 800000 \
        --pipeline-m 50 \
        --pipeline-bits 8 \
-       --start-pipeline-compress-rank 0 \
+       --start-pipeline-compress-rank 1 \
        --is-tensor-compress True \
-       --tensor-compress-method randk_int \
+       --tensor-compress-method power \
        --tensor-ae-dim 100 \
-       --tensor-qr-r 10 \
+       --tensor-qr-r 100 \
        --tensor-k 800000 \
        --tensor-m 50 \
        --tensor-bits 8 \

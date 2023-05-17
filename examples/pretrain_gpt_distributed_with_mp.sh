@@ -10,7 +10,7 @@ NNODES=1
 NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
-DATA_PATH=/home/wisr/song/preprocessed_data/my-gpt2_text_document
+DATA_PATH=/home/xxx/xxx/preprocessed_data/my-gpt2_text_document
 CHECKPOINT_PATH=checkpoints/gpt2_345m_ds
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
@@ -32,8 +32,8 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
-       --vocab-file /home/wisr/song/gpt2-vocab.json \
-       --merge-file /home/wisr/song/gpt2-merges.txt \
+       --vocab-file /home/xxx/xxx/gpt2-vocab.json \
+       --merge-file /home/xxx/xxx/gpt2-merges.txt \
        --data-impl mmap \
        --split 949,50,1 \
        --distributed-backend nccl \

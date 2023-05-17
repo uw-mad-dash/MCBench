@@ -32,10 +32,10 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/vision/main.py \
                --patch-size 32 \
                --encoder-seq-length 512 \
                --decoder-seq-length 512 \
-               --micro-batch-size 256 \
+               --micro-batch-size 512 \
                --max-position-embeddings 512 \
                --optimizer 'sgd' \
-               --lr 0.01 \
+               --lr 0.03 \
                --lr-decay-style 'cosine' \
                --weight-decay 0.0 \
                --save-interval 500000 \
@@ -49,7 +49,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/vision/main.py \
                --is-pipeline-compress True \
                --pipeline-compress-method power \
                --pipeline-ae-dim 100 \
-               --pipeline-qr-r 50 \
+               --pipeline-qr-r 100 \
                --pipeline-k 5043200 \
                --pipeline-m 50 \
                --pipeline-bits 8 \
@@ -57,7 +57,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/vision/main.py \
                --is-tensor-compress True \
                --tensor-compress-method power \
                --tensor-ae-dim 100 \
-               --tensor-qr-r 50 \
+               --tensor-qr-r 100 \
                --tensor-k 5043200 \
                --tensor-m 50 \
                --tensor-bits 8 \

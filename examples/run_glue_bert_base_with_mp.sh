@@ -10,22 +10,21 @@ DISTRIBUTED_ARGS="--nproc_per_node $WORLD_SIZE \
                   --master_addr localhost \
                   --master_port 6001"
 
-TRAIN_DATA="../glue_data/STS-B/train.tsv"
-VALID_DATA="../glue_data/STS-B/dev.tsv"
+TRAIN_DATA="../glue_data/QNLI/train.tsv"
+VALID_DATA="../glue_data/QNLI/dev.tsv"
 VOCAB_FILE="../bert-base-cased-vocab.txt"
 PRETRAINED_CHECKPOINT=checkpoints/bert_base_hf/split_2t_2p
 
-for method in 'ae' 'quantize' 'topk_int'
+for method in 'ae'
 do
   if [ $method == 'ae' ];
   then
     for dim in 50 100
     do
       python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
-               --is-skip-compression-inference True \
                --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 2 \
-               --task STS \
+               --task QNLI \
                --seed 1234 \
                --train-data $TRAIN_DATA \
                --valid-data $VALID_DATA \

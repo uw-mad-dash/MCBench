@@ -85,10 +85,10 @@ do
                --num-layers 24 \
                --hidden-size 1024 \
                --num-attention-heads 16 \
-               --micro-batch-size 32 \
+               --micro-batch-size 8 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 512 \
+               --seq-length 128 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --log-interval 10 \

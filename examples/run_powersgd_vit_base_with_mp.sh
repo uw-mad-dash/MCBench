@@ -22,13 +22,20 @@ do
   do
     for dataset in 'cifar10' 'cifar100'
     do
+      if [ $dataset == 'cifar10' ];
+      then
+        CLASSES=10
+      elif [ $dataset == 'cifar100' ];
+      then
+        CLASSES=100
+      fi
       python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/vision/main.py \
                --is-vision-train True \
                --tensor-model-parallel-size 2 \
                --pipeline-model-parallel-size 2 \
                --task classify \
-               --dataset-name 'cifar10' \
-               --num-classes 10 \
+               --dataset-name $dataset \
+               --num-classes $CLASSES \
                --epochs 100 \
                --pretrained-checkpoint $PRETRAINED_CHECKPOINT \
                --num-layers 12 \

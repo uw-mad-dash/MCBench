@@ -17,8 +17,8 @@ NNODES=1
 NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
-DATA_PATH="/l/users/hongyiwa/datasets/ILSVRC2012/train \
-           /l/users/hongyiwa/datasets/ILSVRC2012/val"
+DATA_PATH="/l/users/xxx/datasets/ILSVRC2012/train \
+           /l/users/xxx/datasets/ILSVRC2012/val"
 CHECKPOINT_PATH=checkpoints/vision_classify_pretrain
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"

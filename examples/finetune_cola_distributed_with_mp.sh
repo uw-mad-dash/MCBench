@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, qr]
+# compress method in [ae, quantize, topk_int, randk_int, topk, randk, topk_feedback, randk_feedback, power, ef_power]
 
 WORLD_SIZE=4
 
@@ -34,7 +34,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --micro-batch-size 32 \
                --lr 5.0e-5 \
                --lr-warmup-fraction 0.065 \
-               --seq-length 128 \
+               --seq-length 512 \
                --max-position-embeddings 512 \
                --save-interval 500000 \
                --log-interval 10 \
@@ -45,7 +45,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --is-pipeline-compress True \
                --pipeline-compress-method power \
                --pipeline-ae-dim 50 \
-               --pipeline-qr-r 100 \
+               --pipeline-qr-r 50 \
                --pipeline-k 100000 \
                --pipeline-m 50 \
                --pipeline-bits 2 \
@@ -53,7 +53,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --is-tensor-compress True \
                --tensor-compress-method power \
                --tensor-ae-dim 50 \
-               --tensor-qr-r 100 \
+               --tensor-qr-r 50 \
                --tensor-k 100000 \
                --tensor-m 50 \
                --tensor-bits 2 \

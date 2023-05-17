@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=4_4_dacheng_bert_pretrain    # create a short name for your job
-#SBATCH --output=results/4_4_dacheng_bert_pretrain_topk_1000000.txt
+#SBATCH --job-name=4_4_xxx_bert_pretrain    # create a short name for your job
+#SBATCH --output=results/4_4_xxx_bert_pretrain_topk_1000000.txt
 #SBATCH --nodes=4                # node count
 #SBATCH --ntasks-per-node=4      # total number of tasks across all nodes
 #SBATCH --cpus-per-task=32        # cpu-cores per task (>1 if multi-threaded tasks)
@@ -26,7 +26,7 @@ echo "MASTER_ADDR="$MASTER_ADDR
 
 DATA_PATH=../my-bert-wiki-and-book_text_sentence
 VOCAB_FILE=../bert-large-cased-vocab.txt
-CHECKPOINT_PATH=checkpoints/4_4_dacheng_bert_pretrain_topk_1000000
+CHECKPOINT_PATH=checkpoints/4_4_xxx_bert_pretrain_topk_1000000
 
 options="\
        --tensor-model-parallel-size 4 \
@@ -79,4 +79,4 @@ options="\
 run_cmd="python -u ../pretrain_bert.py $@ ${options}"
 
 srun -l \
-     --output=results/4_4_dacheng_bert_pretrain_topk_1000000.txt sh -c "${run_cmd}"
+     --output=results/4_4_xxx_bert_pretrain_topk_1000000.txt sh -c "${run_cmd}"
