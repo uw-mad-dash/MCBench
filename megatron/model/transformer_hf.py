@@ -777,24 +777,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                         args.seq_length, args.micro_batch_size, args.hidden_size,
                         dtype=args.params_dtype
                     )
-                elif self.pipeline_compress_method == 'topk':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   dtype=torch.int64)
-                elif self.pipeline_compress_method == 'randk':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   dtype=torch.int64)
-                elif self.pipeline_compress_method == 'srht':
-                    self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16)
-                elif self.pipeline_compress_method == 'topk_feedback':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   dtype=torch.int64)
-                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                      dtype=args.params_dtype)
-                elif self.pipeline_compress_method == 'randk_feedback':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   dtype=torch.int64)
-                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                      dtype=args.params_dtype)
         else:
             if self.is_pipeline_compress:
                 if self.pipeline_compress_method == 'ae':
@@ -830,30 +812,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                         device=torch.cuda.current_device(),
                         dtype=torch.float64
                     )
-                elif self.pipeline_compress_method == 'topk':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   device=torch.cuda.current_device(),
-                                                   dtype=torch.int64)
-                elif self.pipeline_compress_method == 'randk':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   device=torch.cuda.current_device(),
-                                                   dtype=torch.int64)
-                elif self.pipeline_compress_method == 'srht':
-                    self.H_tensor = torch.tensor(hadamard(args.hidden_size), dtype=torch.float16).cuda()
-                elif self.pipeline_compress_method == 'topk_feedback':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   device=torch.cuda.current_device(),
-                                                   dtype=torch.int64)
-                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                      device=torch.cuda.current_device(),
-                                                      dtype=args.params_dtype)
-                elif self.pipeline_compress_method == 'randk_feedback':
-                    self.bool_matrix = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                   device=torch.cuda.current_device(),
-                                                   dtype=torch.int64)
-                    self.error_feedback = torch.zeros(args.seq_length, args.micro_batch_size, args.hidden_size,
-                                                      device=torch.cuda.current_device(),
-                                                      dtype=args.params_dtype)
 
     def forward(self, hidden_states, attention_mask,
                 encoder_output=None, enc_dec_attn_mask=None,
@@ -958,94 +916,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 p_hat = p_hat.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
                 q_next = q_next.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
                 output = [p_hat, q_next]
-            elif self.pipeline_compress_method == 'topk':
-                batch_size = output.size()[1]
-                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.pipeline_k)
-                self.bool_matrix.zero_()
-                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
-                bool_matrix = bool_matrix.reshape(-1, )
-                bool_matrix[indices] = 1
-                bool_matrix = bool_matrix.reshape(input_abs_size)
-                loc = torch.nonzero(bool_matrix)
-                value = value.reshape(-1, 1)
-                output = torch.cat((loc, value), dim=1)
-            elif self.pipeline_compress_method == 'randk':
-                batch_size = output.size()[1]
-                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.pipeline_k)
-                self.bool_matrix.zero_()
-                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
-                bool_matrix = bool_matrix.reshape(-1, )
-                bool_matrix[indices] = 1
-                bool_matrix = bool_matrix.reshape(input_abs_size)
-                loc = torch.nonzero(bool_matrix)
-                value = value.reshape(-1, 1)
-                output = torch.cat((loc, value), dim=1)
-            elif self.pipeline_compress_method == 'topk_old':
-                value, indices, _, _ = topk.encoder(output, k=self.pipeline_k)
-                value = value.to(torch.float32)
-                indices = indices.to(torch.float32)
-                output = torch.stack((value, indices), 0)
-            elif self.pipeline_compress_method == 'randk_old':
-                value, indices, _, _ = topk.encoder(output, k=self.pipeline_k)
-                value = value.to(torch.float32)
-                indices = indices.to(torch.float32)
-                output = torch.stack((value, indices), 0)
-            elif self.pipeline_compress_method == 'topk_feedback':
-                batch_size = output.size()[1]
-                output.data = output.data + self.error_feedback[:, :batch_size, :].data
-                value, indices, input_abs_size, input_abs_seq_size = topk.encoder(output, k=self.pipeline_k)
-                topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
-                topk_dense = topk_sparse.to_dense()
-                topk_res = torch.reshape(topk_dense, input_abs_size)
-                self.error_feedback[:, :batch_size, :].data = output.data - topk_res.data
-                self.bool_matrix.zero_()
-                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
-                bool_matrix = bool_matrix.reshape(-1, )
-                bool_matrix[indices] = 1
-                bool_matrix = bool_matrix.reshape(input_abs_size)
-                loc = torch.nonzero(bool_matrix)
-                value = value.reshape(-1, 1)
-                output = torch.cat((loc, value), dim=1)
-            elif self.pipeline_compress_method == 'randk_feedback':
-                batch_size = output.size()[1]
-                output.data = output.data + self.error_feedback[:, :batch_size, :].data
-                value, indices, input_abs_size, input_abs_seq_size = randk.encoder(output, k=self.pipeline_k)
-                topk_sparse = torch.sparse_coo_tensor(indices.unsqueeze(0), value, input_abs_seq_size)
-                topk_dense = topk_sparse.to_dense()
-                topk_res = torch.reshape(topk_dense, input_abs_size)
-                self.error_feedback[:, :batch_size, :].data = output.data - topk_res.data
-                self.bool_matrix.zero_()
-                bool_matrix = self.bool_matrix[:, :batch_size, :].detach()
-                bool_matrix = bool_matrix.reshape(-1, )
-                bool_matrix[indices] = 1
-                bool_matrix = bool_matrix.reshape(input_abs_size)
-                loc = torch.nonzero(bool_matrix)
-                value = value.reshape(-1, 1)
-                output = torch.cat((loc, value), dim=1)
-            elif self.pipeline_compress_method == 'srht':
-                compress_output, S = srht.encoder(output, self.H_tensor,
-                                                  d=args.hidden_size, m=args.pipeline_m)
-                compress_output = torch.reshape(
-                    compress_output, (args.seq_length * args.micro_batch_size, args.pipeline_m)
-                )
-                output = torch.cat((compress_output, S.T), 0)
-            elif self.pipeline_compress_method == 'ct':
-                compress_output, S = ct.encoder(output,
-                                                d=args.hidden_size, m=args.pipeline_m)
-                compress_output = torch.reshape(
-                    compress_output, (args.seq_length * args.micro_batch_size, args.pipeline_m)
-                )
-                output = torch.cat((compress_output, S.T), 0)
-            elif self.pipeline_compress_method == 'qr':
-                Q = torch.randn(args.hidden_size,
-                                self.pipeline_qr_r, dtype=torch.float16).cuda()
-                P = torch.matmul(output, Q)
-                P = P.to(torch.float32)
-                P = P.permute(1, 0, 2)
-                P_hat = torch.linalg.qr(P).Q
-                P_hat = P_hat.to(torch.float16)
-                Q = torch.matmul(output.permute(1, 2, 0), P_hat)
-                output = torch.cat((P_hat, Q), 1)
             elif self.pipeline_compress_method == "quantize":
                 if args.pipeline_bits == 8:
                     output.data, scale = quantize.compress_8bit(output.detach())
@@ -1056,39 +926,6 @@ class ParallelTransformerEncoderLayer(MegatronModule):
                 else:
                     raise ValueError("pipeline bits is not correct")
                 output = [output, scale]
-            elif self.pipeline_compress_method == 'quantize_float':
-                if args.pipeline_bits == 8:
-                    compress_set = quantize.compress_8bit(output)
-                    value = compress_set[0].to(torch.float16)
-                    scaler = compress_set[1].to(torch.float16)
-                    scaler = torch.flatten(scaler)
-                    value_size = value.size()
-                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
-                    scaler = scaler.reshape(1, value_size[2])
-                    output = torch.cat((value, scaler), dim=0)
-                elif args.pipeline_bits == 4:
-                    compress_set = quantize.compress_4bit(output)
-                    value = compress_set[0].to(torch.float16)
-                    scaler = compress_set[1].to(torch.float16)
-                    scaler = torch.flatten(scaler)
-                    value_size = value.size()
-                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
-                    scaler = scaler.reshape(2, value_size[2])
-                    output = torch.cat((value, scaler), dim=0)
-                elif args.pipeline_bits == 2:
-                    compress_set = quantize.compress_2bit(output)
-                    value = compress_set[0].to(torch.float16)
-                    scaler = compress_set[1].to(torch.float16)
-                    scaler = torch.flatten(scaler)
-                    value_size = value.size()
-                    value = value.reshape(value_size[0] * value_size[1], value_size[2])
-                    scaler = scaler.reshape(4, value_size[2])
-                    output = torch.cat((value, scaler), dim=0)
-                else:
-                    raise ValueError("tensor bits is error")
-            elif self.pipeline_compress_method == 'quantize_old':
-                output = output.to(torch.int16)
-                output = output.to(torch.int8)
             else:
                 raise ValueError("Pipeline Compression Method is Wrong")
             # output = F.normalize(output)
@@ -1226,60 +1063,6 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 hidden_states = torch.bmm(p_hat, q.permute([0, 2, 1]))
                 hidden_states = hidden_states.permute([1, 0, 2])
                 hidden_states = hidden_states.to(dtype=args.params_dtype, memory_format=torch.contiguous_format)
-            elif self.pipeline_compress_method == 'topk':
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                loc = hidden_states[:, :3]
-                value = hidden_states[:, 3]
-                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
-            elif self.pipeline_compress_method == 'randk':
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                loc = hidden_states[:, :3]
-                value = hidden_states[:, 3]
-                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
-            elif self.pipeline_compress_method == "topk_old":
-                value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                input_abs_seq_size = torch.Size([args.seq_length *
-                                                 args.micro_batch_size *
-                                                 args.hidden_size])
-                hidden_states = topk.decoder(value, indices, input_abs_size, input_abs_seq_size)
-            elif self.pipeline_compress_method == "randk_old":
-                value, indices = hidden_states[0].to(torch.float16), hidden_states[1].to(torch.int64)
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                input_abs_seq_size = torch.Size([args.seq_length *
-                                                 args.micro_batch_size *
-                                                 args.hidden_size])
-                hidden_states = randk.decoder(value, indices, input_abs_size, input_abs_seq_size)
-            elif self.pipeline_compress_method == 'topk_feedback':
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                loc = hidden_states[:, :3]
-                value = hidden_states[:, 3]
-                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
-            elif self.pipeline_compress_method == 'randk_feedback':
-                input_abs_size = torch.Size([args.seq_length, args.micro_batch_size, args.hidden_size])
-                loc = hidden_states[:, :3]
-                value = hidden_states[:, 3]
-                hidden_states = torch.sparse_coo_tensor(loc.T, value, input_abs_size).to_dense()
-            elif self.pipeline_compress_method == 'srht':
-                output_compress, S_T = hidden_states[:args.seq_length * args.micro_batch_size, :], \
-                                       hidden_states[args.seq_length * args.micro_batch_size:, :]
-                output_compress = torch.reshape(
-                    output_compress, (args.seq_length, args.micro_batch_size, args.pipeline_m)
-                )
-                hidden_states = srht.decoder(output_compress, S_T.T)
-            elif self.pipeline_compress_method == 'ct':
-                output_compress, S_T = hidden_states[:args.seq_length * args.micro_batch_size, :], \
-                                       hidden_states[args.seq_length * args.micro_batch_size:, :]
-                output_compress = torch.reshape(
-                    output_compress, (args.seq_length, args.micro_batch_size, args.pipeline_m)
-                )
-                hidden_states = ct.decoder(output_compress, S_T.T)
-            elif self.pipeline_compress_method == 'qr':
-                split = torch.split(hidden_states, [args.seq_length, args.hidden_size], 1)
-                P_hat = split[0]
-                Q = split[1]
-                hidden_states = torch.matmul(P_hat, Q.permute(0, 2, 1))
-                hidden_states = hidden_states.permute(1, 0, 2)
             elif self.pipeline_compress_method == "quantize":
                 if args.pipeline_bits == 8:
                     hidden_states[0].data = quantize.decompress_8bit(hidden_states[0].detach(), hidden_states[1])
@@ -1290,30 +1073,6 @@ class ParallelTransformerDecoderLayer(MegatronModule):
                 else:
                     raise ValueError("pipeline bits is not correct")
                 hidden_states = hidden_states[0]
-            elif self.pipeline_compress_method == 'quantize_float':
-                if args.pipeline_bits == 8:
-                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
-                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
-                    value = value.reshape(args.seq_length, args.micro_batch_size, args.hidden_size)
-                    scale = scale.reshape(1, -1).unsqueeze(0)
-                    hidden_states = quantize.decompress_8bit(value, scale)
-                elif args.pipeline_bits == 4:
-                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
-                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
-                    value = value.reshape(args.seq_length, args.micro_batch_size, int(args.hidden_size / 2))
-                    scale = scale.reshape(1, -1).unsqueeze(0)
-                    hidden_states = quantize.decompress_4bit(value, scale)
-                elif args.pipeline_bits == 2:
-                    value = hidden_states[:args.seq_length * args.micro_batch_size, :]
-                    scale = hidden_states[args.seq_length * args.micro_batch_size:, :]
-                    value = value.reshape(args.seq_length, args.micro_batch_size, int(args.hidden_size / 4))
-                    scale = scale.reshape(1, -1).unsqueeze(0)
-                    hidden_states = quantize.decompress_2bit(value, scale)
-                else:
-                    raise ValueError("tensor bits is error")
-            elif self.pipeline_compress_method == 'quantize_old':
-                hidden_states = hidden_states.to(torch.int16)
-                hidden_states = hidden_states.to(torch.float16)
             else:
                 raise ValueError("Pipeline Compression Method is Wrong")
             # hidden_states = F.normalize(hidden_states)
