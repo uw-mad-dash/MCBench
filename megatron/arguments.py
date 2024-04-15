@@ -889,7 +889,8 @@ def _add_data_args(parser):
                                 'BertBaseNV',
                                 'BertBaseHF',
                                 'BertBaseWordPieceLowerCase',
-                                'GPT2BPETokenizer'],
+                                'OPTTokenizer',
+                                'XLM-Roberta-Tokenizer'],
                        help='What type of tokenizer to use.')
     group.add_argument('--data-impl', type=str, default='infer',
                        choices=['lazy', 'cached', 'mmap', 'infer'],

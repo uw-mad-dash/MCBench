@@ -10,8 +10,11 @@ NNODES=1
 NODE_RANK=0
 WORLD_SIZE=$(($GPUS_PER_NODE*$NNODES))
 
-DATA_PATH=/home/xxx/xxx/preprocessed_data/my-gpt2_text_document
-CHECKPOINT_PATH=checkpoints/gpt2_345m_ds
+VOCAB_FILE=../opt-3b-vocab.json
+MERGE_FILE=../opt-3b-merges.txt
+DATA_PATH=/users/Master/Megatron-Resource/data/my-gpt2_text_document
+#PRETRAINED_CHECKPOINT=checkpoints/opt_3b/split_2t_2p
+CHECKPOINT_PATH=checkpoints/opt_3b_ds
 
 DISTRIBUTED_ARGS="--nproc_per_node $GPUS_PER_NODE --nnodes $NNODES --node_rank $NODE_RANK --master_addr $MASTER_ADDR --master_port $MASTER_PORT"
 
@@ -19,21 +22,21 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        ../pretrain_gpt.py \
        --tensor-model-parallel-size 2 \
        --pipeline-model-parallel-size 2 \
-       --sequence-parallel \
-       --num-layers 24 \
-       --hidden-size 1024 \
-       --num-attention-heads 16 \
-       --micro-batch-size 4 \
+       --num-layers 32 \
+       --hidden-size 2560 \
+       --num-attention-heads 32 \
+       --tokenizer-type OPTTokenizer \
+       --micro-batch-size 8 \
        --global-batch-size 16 \
-       --seq-length 1024 \
-       --max-position-embeddings 1024 \
+       --seq-length 512 \
+       --max-position-embeddings 2050 \
        --train-iters 500000 \
        --lr-decay-iters 320000 \
        --save $CHECKPOINT_PATH \
        --load $CHECKPOINT_PATH \
        --data-path $DATA_PATH \
-       --vocab-file /home/xxx/xxx/gpt2-vocab.json \
-       --merge-file /home/xxx/xxx/gpt2-merges.txt \
+       --vocab-file $VOCAB_FILE \
+       --merge-file $MERGE_FILE \
        --data-impl mmap \
        --split 949,50,1 \
        --distributed-backend nccl \
@@ -48,7 +51,19 @@ python -m torch.distributed.launch $DISTRIBUTED_ARGS \
        --eval-interval 1000 \
        --eval-iters 10 \
        --fp16 \
-       --is-pipeline-compress False \
-       --pipeline-compress-dim 2 \
+       --is-pipeline-compress True \
+       --pipeline-compress-method quantize \
+       --pipeline-ae-dim 256 \
+       --pipeline-qr-r 256 \
+       --pipeline-k 500000 \
+       --pipeline-m 50 \
+       --pipeline-bits 8 \
+       --start-pipeline-compress-rank 0 \
        --is-tensor-compress True \
-       --tensor-compress-dim 2
+       --tensor-compress-method quantize \
+       --tensor-ae-dim 256 \
+       --tensor-qr-r 256 \
+       --tensor-k 500000 \
+       --tensor-m 50 \
+       --tensor-bits 8 \
+       --start-tensor-compress-layer 16 \
