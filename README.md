@@ -1,3 +1,55 @@
+# MCBench
+
+Our code is based on Megatron-LM developed by NVIDIA.
+
+# Quick Start
+
+To get started, please first setup the environment:
+```bash
+pip install -r requirements.txt
+```
+
+Moreover, please proceed with the following steps to install apex:
+```bash
+git clone https://github.com/NVIDIA/apex.git
+git checkout 22.04-dev
+pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
+```
+
+Download GLUE dataset:
+```bash
+python download_glue_data.py
+```
+
+Download Checkpoints:
+```bash
+cd examples
+mkdir checkpoints
+cd checkpoints
+wget --content-disposition https://api.ngc.nvidia.com/v2/models/nvidia/megatron_bert_345m/versions/v0.1_cased/zip -O megatron_bert_345m_v0.1_cased.zip
+unzip megatron_bert_345m_v0.1_cased.zip -d bert_345m
+```
+
+Download vocabulary files:
+```bash
+wget https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-vocab.txt
+```
+
+Split the checkpoints:
+```bash
+cd tools
+bash split_single.sh
+```
+Note: we need to set pipeline parallelism degree and tensor parallelism degree to fit the fine-tuning process.
+
+Finetune Example:
+```bash
+cd examples
+bash finetune_mrpc_distributed_with_mp.sh
+```
+
+# Megatron
+
 Megatron ([1](https://arxiv.org/pdf/1909.08053.pdf), [2](https://arxiv.org/pdf/2104.04473.pdf), and [3](https://arxiv.org/pdf/2205.05198)) is a large, powerful transformer developed by the Applied Deep Learning Research team at NVIDIA. This repository is for ongoing research on training large transformer language models at scale. We developed efficient, model-parallel ([tensor](https://arxiv.org/pdf/1909.08053.pdf), [sequence](https://arxiv.org/pdf/2205.05198), and [pipeline](https://arxiv.org/pdf/2104.04473.pdf)), and multi-node pre-training of transformer based models such as [GPT](https://arxiv.org/abs/2005.14165), [BERT](https://arxiv.org/pdf/1810.04805.pdf), and [T5](https://arxiv.org/abs/1910.10683) using mixed precision.
 
 Below are some of the projects where we have directly used Megatron:

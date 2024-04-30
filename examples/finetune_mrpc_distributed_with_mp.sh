@@ -43,7 +43,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main.py \
                --eval-iters 50 \
                --weight-decay 1.0e-1 \
                --fp16 \
-               --is-pipeline-compress True \
+               --is-pipeline-compress False \
                --pipeline-compress-method power \
                --pipeline-ae-dim 50 \
                --pipeline-qr-r 50 \

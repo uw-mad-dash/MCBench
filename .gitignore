@@ -19,7 +19,6 @@ tools/xlm-roberta-xl-tokenizer
 tools/roberta-base-tokenizer
 tools/save_vocab.py
 glue_data
-download_glue_data.py
 megatron_bert_345m_v0.1_cased.zip
 megatron_bert_345m_v0.1_uncased.zip
 examples/results
