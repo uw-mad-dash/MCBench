@@ -4,7 +4,6 @@ __pycache__
 RACE.tar.gz
 bert-large-cased-vocab.txt
 bert-large-uncased-vocab.txt
-bert-base-cased-vocab.txt
 bert-base-uncased-vocab.txt
 llama-7b-vocab.txt
 opt-3b-vocab.txt

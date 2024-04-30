@@ -42,10 +42,35 @@ bash split_single.sh
 ```
 Note: we need to set pipeline parallelism degree and tensor parallelism degree to fit the fine-tuning process.
 
-Finetune Example:
+Finetune BERT-345M (BERT-Large):
 ```bash
 cd examples
 bash finetune_mrpc_distributed_with_mp.sh
+```
+
+# Integration with Huggingface
+
+To utilize the checkpoints from Huggingface, proceed with these steps:
+1. Implement Transformer-based Model by using Transformer function provided by Megatron-LM.
+2. Download checkpoints and preprocess the Huggingface checkpoints.
+3. Split the checkpoints for fine-tuning.
+
+Here, we present an example. Given that the BERT-Base model is already implemented in our repository, we will only demonstrate the final two steps.
+
+Download and preprocess the Huggingface checkpoints
+```bash
+python preprocess_hf_bert_checkpoint.py
+```
+
+Split the checkpoints
+```bash
+bash split_single_hf.sh
+```
+
+Finetune BERT-Base:
+```bash
+cd examples
+bash finetune_mrpc_bert_base_with_mp.sh
 ```
 
 # Megatron

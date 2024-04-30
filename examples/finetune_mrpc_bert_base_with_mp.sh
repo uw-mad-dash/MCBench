@@ -44,7 +44,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
                --weight-decay 1.0e-1 \
                --layernorm-epsilon 1e-12 \
                --fp16 \
-               --is-pipeline-compress True \
+               --is-pipeline-compress False \
                --pipeline-compress-method ef_power \
                --pipeline-ae-dim 100 \
                --pipeline-qr-r 50 \
@@ -52,7 +52,7 @@ python3 -m torch.distributed.launch $DISTRIBUTED_ARGS ../tasks/main_hf.py \
                --pipeline-m 50 \
                --pipeline-bits 8 \
                --start-pipeline-compress-rank 0 \
-               --is-tensor-compress True \
+               --is-tensor-compress False \
                --tensor-compress-method ef_power \
                --tensor-ae-dim 100 \
                --tensor-qr-r 50 \
