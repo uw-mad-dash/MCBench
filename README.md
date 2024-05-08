@@ -122,3 +122,16 @@ Expanding our repository to include additional Huggingface models requires us to
 Authors: Song Bian*, Dacheng Li*, Hongyi Wang, Eric P. Xing, Shivaram Venkataraman
 
 Affiliated: University of Wisconsin-Madison, Carnegie Mellon University, MBZUAI, and Petuum Inc.
+
+## Citation
+
+If you find the idea or code useful for your research, please consider citing our [paper](https://arxiv.org/pdf/2301.02654):
+
+```bib
+@article{bian2023does,
+  title={Does compressing activations help model parallel training?},
+  author={Bian, Song and Li, Dacheng and Wang, Hongyi and Xing, Eric P and Venkataraman, Shivaram},
+  journal={arXiv preprint arXiv:2301.02654},
+  year={2023}
+}
+```
